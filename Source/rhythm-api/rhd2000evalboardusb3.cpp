@@ -2244,52 +2244,60 @@ void Rhd2000EvalBoardUsb3::setStimVoltage (bool stimVoltage)
     std::this_thread::sleep_for (std::chrono::milliseconds (10));
 }
 
-//erase data from selected flash sectors
-void Rhd2000EvalBoardUsb3::trigEraseSectors (int address, int sectors)
+//erase data from selected flash sectors. Returns false on timeout.
+bool Rhd2000EvalBoardUsb3::trigEraseSectors (int address, int sectors)
 {
-
-    int i = 0;
-
-    dev->SetWireInValue (ADDR, address); // Send starting address
-    dev->SetWireInValue (LENGTH, sectors); // Send the number of sectors to erase
-    dev->UpdateWireIns();
-    dev->UpdateTriggerOuts();
-    dev->ActivateTriggerIn (CMD_TRIG, 3);
-
-    do
     {
-        //std::this_thread::sleep_for (std::chrono::milliseconds (150));        //typical sector erases take 100ms, long ones are longer
-        dev->UpdateTriggerOuts();
-        if (dev->IsTriggered (0x60, 0x0001))
+        lock_guard<mutex> lockOk (okMutex);
+        dev->SetWireInValue (ADDR, address); // Send starting address
+        dev->SetWireInValue (LENGTH, sectors); // Send the number of sectors to erase
+        dev->UpdateWireIns();
+        dev->UpdateTriggerOuts(); // clear any stale flash-done trigger
+        dev->ActivateTriggerIn (CMD_TRIG, 3);
+    }
+
+    //typical sector erases take ~100ms, worst case is a few seconds per sector.
+    //Poll without holding the USB lock so acquisition can keep reading data.
+    const auto timeout = std::chrono::milliseconds (2000 + 3000 * sectors);
+    const auto start = std::chrono::steady_clock::now();
+
+    while (true)
+    {
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+
         {
-            printf ("Erased %d sector(s) starting at address 0x%04X.\n", (sectors), address);
-            break;
+            lock_guard<mutex> lockOk (okMutex);
+            dev->UpdateTriggerOuts();
+            if (dev->IsTriggered (FLASH_DONE, 0x0001))
+            {
+                printf ("Erased %d sector(s) starting at address 0x%04X.\n", (sectors), address);
+                return true;
+            }
         }
-        /*
-        if (i > 256)
+
+        if (std::chrono::steady_clock::now() - start > timeout)
         {
             printf ("Error: Timeout in EraseSectors -- Erasure failed.\n");
-            break;
+            return false;
         }
-        i++;
-        */
-    } while (1);
+    }
 }
 
 //write data to flash starting at first sector.
-int Rhd2000EvalBoardUsb3::trigWrite (const string& filename, int file_size)
+int Rhd2000EvalBoardUsb3::trigWrite (const string& filename, int file_size, std::function<void (double)> progress)
 {
-    lock_guard<mutex> lockOk (okMutex);
+    //Flash is about to be erased, so never play back the old pattern length
+    //against a partially written flash. Only set on a complete write.
+    {
+        lock_guard<mutex> lockOk (okMutex);
+        patternLength = 0;
+    }
 
     //safeguard in initialize board, sets patternLength to 0
     //upon start up to prevent undefined output behaviour.
-    if (file_size < 0)
-    {
-        patternLength = 0;
+    if (file_size <= 0)
         return -1;
-    }
 
-    patternLength = file_size; //public variable for ease of use currently.
     //Defining the I/O
     std::ifstream bit_in;
     unsigned char buf[BUFFER_SIZE];
@@ -2297,11 +2305,22 @@ int Rhd2000EvalBoardUsb3::trigWrite (const string& filename, int file_size)
     //Open the file
     bit_in.open (filename, std::ios::binary);
 
+    if (! bit_in.is_open())
+    {
+        cout << "Error: could not open pattern file " << filename << endl;
+        return -1;
+    }
+
+    if (progress)
+        progress (0.0);
+
     //erase necessary flash sectors
     int sectorCount = (file_size + FLASH_SECTOR_SIZE - 1) / FLASH_SECTOR_SIZE;
-    trigEraseSectors (0x0000, sectorCount);
 
     cout << "Sector Count: " << sectorCount << endl;
+
+    if (! trigEraseSectors (0x0000, sectorCount))
+        return -1;
 
     //BEGIN WRITE OPERATION
     int num_chunks = (file_size + MAX_TRANSFER_SIZE - 1) / MAX_TRANSFER_SIZE;
@@ -2315,39 +2334,56 @@ int Rhd2000EvalBoardUsb3::trigWrite (const string& filename, int file_size)
     int j = 0;
     for (int i = 0; i < num_chunks; i++)
     {
-        //cout << "j:" << j << endl;
-        fflush (stdout);
         int bytes_to_read = MIN (MAX_TRANSFER_SIZE, remaining_size);
-        bit_in.read ((char*) buf, bytes_to_read); //reads a chunk of data from the buffer and stores it in bitfile
 
-        //cout << "Writing: " << buf[0] << endl;
+        //the last chunk may be partial; don't send leftovers from the previous chunk
+        memset (buf, 0, sizeof (buf));
+        bit_in.read ((char*) buf, bytes_to_read); //reads a chunk of data from the file
 
-        int result = dev->WriteToPipeIn (DATA_IN_PIPE, MAX_TRANSFER_SIZE, buf); //sends max transfer size worth of data to FPGA
-        //  cout << "Pipe In Write Result: " << result << endl;
+        if (bit_in.gcount() != bytes_to_read)
+        {
+            printf ("\nError: Pattern file shorter than expected -- Programming failed.\n");
+            return -1;
+        }
 
-        dev->SetWireInValue (ADDR, j); //sets starting address
-        dev->SetWireInValue (LENGTH, (MAX_TRANSFER_SIZE / FLASH_PAGE_SIZE) - 1); //set number of pages being written (a 0 means 1 page to be written.)
-        dev->UpdateWireIns();
-        dev->UpdateTriggerOuts();
-        dev->ActivateTriggerIn (CMD_TRIG, 5); //trigger programming
+        //lock for one chunk only (a few ms) so the acquisition thread isn't starved
+        {
+            lock_guard<mutex> lockOk (okMutex);
+
+            dev->WriteToPipeIn (DATA_IN_PIPE, MAX_TRANSFER_SIZE, buf); //sends max transfer size worth of data to FPGA
+
+            dev->SetWireInValue (ADDR, j); //sets starting address
+            dev->SetWireInValue (LENGTH, (MAX_TRANSFER_SIZE / FLASH_PAGE_SIZE) - 1); //set number of pages being written (a 0 means 1 page to be written.)
+            dev->UpdateWireIns();
+            dev->UpdateTriggerOuts();
+            dev->ActivateTriggerIn (CMD_TRIG, 5); //trigger programming
+
+            //page programming takes < 1ms per page
+            const auto start = std::chrono::steady_clock::now();
+            while (true)
+            {
+                dev->UpdateTriggerOuts();
+                if (dev->IsTriggered (FLASH_DONE, 0x0001))
+                    break;
+
+                if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds (100))
+                {
+                    printf ("\nError: Timeout in WritePatternfile -- Programming failed.\n");
+                    return -1;
+                }
+            }
+        }
 
         j += MAX_TRANSFER_SIZE / FLASH_PAGE_SIZE;
         remaining_size -= bytes_to_read;
 
-        int k = 0;
-        do
-        {
-            dev->UpdateTriggerOuts();
-            if (dev->IsTriggered (FLASH_DONE, 0x0001))
-                break;
+        if (progress)
+            progress ((double) (i + 1) / num_chunks);
+    }
 
-            k++;
-            if (k > 50)
-            {
-                printf ("\nError: Timeout in WritePatternfile -- Programming failed.\n");
-                return -1;
-            }
-        } while (1);
+    {
+        lock_guard<mutex> lockOk (okMutex);
+        patternLength = file_size; //public variable for ease of use currently.
     }
 
     return 0;

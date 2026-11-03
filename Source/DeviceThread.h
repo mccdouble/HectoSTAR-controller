@@ -213,7 +213,8 @@ public:
     void startStim();
     void stopStim();
     void ledTestSequence (int led);
-    int uploadPatternFile (File patternStimFile);
+    //Blocking (erases + writes flash). Call from a background thread, not the message thread.
+    int uploadPatternFile (File patternStimFile, std::function<void (double)> progress = nullptr);
     void setPatternStimRepeatCount (int count);
     void setStimOutputType (int outputSelection);
 

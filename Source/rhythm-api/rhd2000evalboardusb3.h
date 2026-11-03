@@ -44,6 +44,7 @@
 #define FLASH_PAGE_SIZE 256
 #define FLASH_SECTOR_SIZE (65536)
 
+#include <functional>
 #include <mutex>
 #include <queue>
 #include <stdio.h>
@@ -194,8 +195,11 @@ public:
     void setStimOutputType (int outputType);
 
     //Flash Interface Commands
-    void trigEraseSectors (int address, int sectors);
-    int trigWrite (const std::string& filename, int file_size);
+    //These lock the USB interface per operation (not for the whole upload) so
+    //acquisition keeps streaming while a pattern file is written to flash.
+    bool trigEraseSectors (int address, int sectors);
+    //progress (optional) is called with 0.0 - 1.0 from the calling thread.
+    int trigWrite (const std::string& filename, int file_size, std::function<void (double)> progress = nullptr);
     //void trigReadID();
     int patternLength;
     int repeatCount;

@@ -207,6 +207,51 @@ void ChannelList::lookAndFeelChanged()
     update();
 }
 
+/** Writes a pattern stim file to flash on a background thread so the GUI and
+    acquisition don't stall. Shows a progress window and deletes itself when done. */
+class PatternUploadTask : public ThreadWithProgressWindow
+{
+public:
+    PatternUploadTask (DeviceThread* board_, File file_, std::function<void (bool)> onComplete_)
+        : ThreadWithProgressWindow ("Uploading pattern stim file", true, false),
+          board (board_),
+          file (file_),
+          onComplete (std::move (onComplete_))
+    {
+        setStatusMessage (file.getFileName() + " (" + String (file.getSize()) + " bytes)");
+    }
+
+    void run() override
+    {
+        result = board->uploadPatternFile (file, [this] (double p)
+                                           { setProgress (p); });
+    }
+
+    void threadComplete (bool /*userPressedCancel*/) override
+    {
+        const bool ok = (result >= 0);
+        String message = (ok ? "File upload completed!\nFile Name: " : "File upload FAILED!\nFile Name: ") + file.getFileName();
+
+        if (ok)
+            message += "\nFile Length: " + String (file.getSize()) + " bytes";
+
+        AlertWindow::showMessageBoxAsync (ok ? AlertWindow::InfoIcon : AlertWindow::WarningIcon,
+                                          ok ? "Upload Successful" : "Upload Failed",
+                                          message);
+
+        if (onComplete)
+            onComplete (ok);
+
+        delete this;
+    }
+
+private:
+    DeviceThread* board;
+    File file;
+    std::function<void (bool)> onComplete;
+    std::atomic<int> result { -1 };
+};
+
 void ChannelList::buttonClicked (Button* btn)
 {
   
@@ -283,21 +328,22 @@ void ChannelList::buttonClicked (Button* btn)
 
         {
             File chosenFile = fileChooser.getResult();
-            String filename = chosenFile.getFileName();
-            int64_t fileLength = chosenFile.getSize();
 
-            String message = "File Name: " + filename + "\n" + "File Length: " + juce::String (fileLength) + " bytes";
-            AlertWindow::showMessageBoxAsync (juce::AlertWindow::InfoIcon, "Uploading. Press Ok and Wait for Success Message", message);
+            // Upload in the background; block re-entry until it finishes.
+            selectPatternFileButton->setEnabled (false);
+            uploadStimParamButton->setEnabled (false);
 
-            // Do the upload
-            int uploaded = board->uploadPatternFile(chosenFile);
+            Component::SafePointer<ChannelList> safeThis (this);
 
-            if (uploaded >= 0)
-                message = "File upload completed!\nFile Name: " + filename + "\nFile Length: " + juce::String (fileLength) + " bytes";
-            else
-                message = "File upload FAILED!\nFile Name: " + filename;
-
-            AlertWindow::showMessageBoxAsync (juce::AlertWindow::InfoIcon, (uploaded >= 0) ? "Upload Successful" : "Upload Failed", message);
+            auto* task = new PatternUploadTask (board, chosenFile, [safeThis] (bool)
+                                                {
+                                                    if (safeThis != nullptr)
+                                                    {
+                                                        safeThis->selectPatternFileButton->setEnabled (true);
+                                                        safeThis->uploadStimParamButton->setEnabled (true);
+                                                    }
+                                                });
+            task->launchThread();
         }
     }
 

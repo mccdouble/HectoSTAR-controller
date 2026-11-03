@@ -1991,12 +1991,17 @@ void DeviceThread::setStimOutputType (int outputSelection)
     evalBoard->setStimOutputType (outputSelection);
 }
 
-int DeviceThread::uploadPatternFile (File patternStimFile)
+int DeviceThread::uploadPatternFile (File patternStimFile, std::function<void (double)> progress)
 {
     LOGD ("UPLOADING PATTERN FILE")
     std::string filePath = patternStimFile.getFullPathName().toStdString();
     int file_size = patternStimFile.getSize();
-    return evalBoard->trigWrite (filePath, file_size);
+
+    //the FPGA plays patterns straight from flash, so stop any running
+    //stimulation before the flash is erased and rewritten.
+    evalBoard->stopStim();
+
+    return evalBoard->trigWrite (filePath, file_size, progress);
 }
 
 void DeviceThread::setPatternStimRepeatCount (int count)
