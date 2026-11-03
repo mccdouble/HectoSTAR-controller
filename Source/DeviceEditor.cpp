@@ -44,7 +44,7 @@ inline double round (double x)
 
 DeviceEditor::DeviceEditor (GenericProcessor* parentNode,
                             DeviceThread* board_)
-    : VisualizerEditor (parentNode, "RHD Controller", 230), board (board_)
+    : VisualizerEditor (parentNode, "HectoSTAR", 230), board (board_)
 {
     canvas = nullptr;
     noBoardsDetectedLabel = nullptr;

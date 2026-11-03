@@ -447,10 +447,19 @@ void DeviceThread::scanPorts()
     //Clear previous known streams
     enabledStreams.clear();
 
+    for (auto headstage : headstages)
+    {
+        headstage->setNumStreams (0); // reset stream count
+    }
+
     // Scan SPI ports
     int delay, hs, id;
     int register59Value;
 
+    //chip detection
+    bool intanChipConnected = false;
+
+    //detect headstages connected
     for (auto headstage : headstages)
     {
         headstage->setNumStreams (0); // reset stream count
@@ -460,22 +469,50 @@ void DeviceThread::scanPorts()
     chipId.insertMultiple (0, -1, MAX_NUM_HEADSTAGES);
     Array<int> tmpChipId (chipId);
 
-    setSampleRate (Rhd2000EvalBoardUsb3::SampleRate20000Hz, true);
+     setSampleRate (Rhd2000EvalBoardUsb3::SampleRate30000Hz, true); // set to 30 kHz temporarily
 
-    // Enable only G3 Data stream PortC MISO1 and MISO2 DDR (9 and 11)
+    // Enable all data streams, and set sources to cover one or two chips
+    // on Ports A-D.
 
-    for (int i = 0; i < MAX_NUM_DATA_STREAMS; i++)
+    // THIS IS DIFFERENT FOR RECORDING CONTROLLER:
+    // Enable all data streams, and set sources to cover one or two chips
+    // on Ports A-D.
+    for (int i = 0; i < MAX_NUM_DATA_STREAMS; i += 2)
     {
-        evalBoard->enableDataStream (i, false);
+        evalBoard->enableDataStream (i, true);
+        evalBoard->enableDataStream (i + 1, false);
     }
-
-    //enable both data streams.
-    evalBoard->enableDataStream (9, true);
-    evalBoard->enableDataStream (11, true);
 
     LOGD ("Number of enabled data streams: ", evalBoard->getNumEnabledDataStreams());
 
-    evalBoard->selectAuxCommandBank (Rhd2000EvalBoardUsb3::PortC, Rhd2000EvalBoardUsb3::AuxCmd3, 0);
+    evalBoard->selectAuxCommandBank (Rhd2000EvalBoardUsb3::PortA,
+                                     Rhd2000EvalBoardUsb3::AuxCmd3,
+                                     0);
+    evalBoard->selectAuxCommandBank (Rhd2000EvalBoardUsb3::PortB,
+                                     Rhd2000EvalBoardUsb3::AuxCmd3,
+                                     0);
+    
+    //Dont need to check PortC HectoSTAR controller is
+    //assumed to be connected.
+    //evalBoard->selectAuxCommandBank (Rhd2000EvalBoardUsb3::PortC,
+    //                                Rhd2000EvalBoardUsb3::AuxCmd3,
+    //                                 0);
+    
+    evalBoard->selectAuxCommandBank (Rhd2000EvalBoardUsb3::PortD,
+                                     Rhd2000EvalBoardUsb3::AuxCmd3,
+                                     0);
+    evalBoard->selectAuxCommandBank (Rhd2000EvalBoardUsb3::PortE,
+                                     Rhd2000EvalBoardUsb3::AuxCmd3,
+                                     0);
+    evalBoard->selectAuxCommandBank (Rhd2000EvalBoardUsb3::PortF,
+                                     Rhd2000EvalBoardUsb3::AuxCmd3,
+                                     0);
+    evalBoard->selectAuxCommandBank (Rhd2000EvalBoardUsb3::PortG,
+                                     Rhd2000EvalBoardUsb3::AuxCmd3,
+                                     0);
+    evalBoard->selectAuxCommandBank (Rhd2000EvalBoardUsb3::PortH,
+                                     Rhd2000EvalBoardUsb3::AuxCmd3,
+                                     0);
 
     // Since our longest command sequence is 60 commands, we run the SPI
     // interface for 60 samples. (64 for usb3 power-of two needs)
@@ -485,18 +522,152 @@ void DeviceThread::scanPorts()
     ScopedPointer<Rhd2000DataBlockUsb3> dataBlock =
         new Rhd2000DataBlockUsb3 (evalBoard->getNumEnabledDataStreams());
 
-    //galvani 3
-    evalBoard->setCableLengthMeters (Rhd2000EvalBoardUsb3::PortC, 4);
+    Array<int> sumGoodDelays;
+    sumGoodDelays.insertMultiple (0, 0, MAX_NUM_HEADSTAGES);
 
-    //Simply enable only G3 a
-    int chipIdx = 0;
-    hs = 4;
+    Array<int> indexFirstGoodDelay;
+    indexFirstGoodDelay.insertMultiple (0, -1, MAX_NUM_HEADSTAGES);
 
-    LOGD ("Enabling G3")
-    enableHeadstage (4, true, 2, 32);
-    enableHeadstage (5, true, 2, 32);
+    Array<int> indexSecondGoodDelay;
+    indexSecondGoodDelay.insertMultiple (0, -1, MAX_NUM_HEADSTAGES);
 
-    chipId.set (chipIdx++, CHIP_ID_GALVANI);
+    // Run SPI command sequence at all 16 possible FPGA MISO delay settings
+    // to find optimum delay for each SPI interface cable.
+
+    LOGD ("Checking for connected amplifier chips...");
+
+    for (delay = 0; delay < 16; delay++)
+    {
+        evalBoard->setCableDelay (Rhd2000EvalBoardUsb3::PortA, delay);
+        evalBoard->setCableDelay (Rhd2000EvalBoardUsb3::PortB, delay);
+        evalBoard->setCableDelay (Rhd2000EvalBoardUsb3::PortC, delay);
+        evalBoard->setCableDelay (Rhd2000EvalBoardUsb3::PortD, delay);
+        evalBoard->setCableDelay (Rhd2000EvalBoardUsb3::PortE, delay);
+        evalBoard->setCableDelay (Rhd2000EvalBoardUsb3::PortF, delay);
+        evalBoard->setCableDelay (Rhd2000EvalBoardUsb3::PortG, delay);
+        evalBoard->setCableDelay (Rhd2000EvalBoardUsb3::PortH, delay);
+
+
+        // Start SPI interface.
+        evalBoard->run();
+
+        // Wait for the 60-sample run to complete.
+        while (evalBoard->isRunning())
+        {
+            ;
+        }
+        // Read the resulting single data block from the USB interface.
+        evalBoard->readDataBlock (dataBlock, INIT_STEP);
+
+        // Read the Intan chip ID number from each RHD2000 chip found.
+        // Record delay settings that yield good communication with the chip.
+        
+        // There are only 2 intan ports on HectoSTAR board. ports A and B?
+        for (hs = 0; hs < 4; ++hs)
+        {
+            id = getDeviceId (dataBlock, hs, register59Value);
+
+            if (id == CHIP_ID_RHD2132 || id == CHIP_ID_RHD2216 || (id == CHIP_ID_RHD2164 && register59Value == REGISTER_59_MISO_A))
+            {
+                
+                LOGD ("Device ID found: ", id);
+                LOGD ("On Headstage number: ", hs);
+
+                intanChipConnected = true;
+
+                sumGoodDelays.set (hs, sumGoodDelays[hs] + 1);
+
+                if (indexFirstGoodDelay[hs] == -1)
+                {
+                    indexFirstGoodDelay.set (hs, delay);
+                    tmpChipId.set (hs, id);
+                }
+                else if (indexSecondGoodDelay[hs] == -1)
+                {
+                    indexSecondGoodDelay.set (hs, delay);
+                    tmpChipId.set (hs, id);
+                }
+            }
+        }
+    }
+
+
+    //CHECK IF AN INTAN HEADSTAGE IS CONNECTED - if it is assume ACUTE setup.
+   
+
+    //if no intan chip connected, assume HectoSTAR Chronic.
+   
+    if (!intanChipConnected){
+        //disable all data streams except for G3. 
+        for (int i = 0; i < MAX_NUM_DATA_STREAMS; i++)
+        {
+            evalBoard->enableDataStream (i, false);
+        }
+
+        //enable both data streams.
+        evalBoard->enableDataStream (9, true);
+        evalBoard->enableDataStream (11, true);
+
+        
+        setSampleRate (Rhd2000EvalBoardUsb3::SampleRate20000Hz, true);
+
+        //galvani 3
+        evalBoard->setCableLengthMeters (Rhd2000EvalBoardUsb3::PortC, 4);
+
+        //Simply enable only G3 a
+        int chipIdx = 0;
+        hs = 4;
+
+        LOGD ("Enabling G3")
+        enableHeadstage (4, true, 2, 32);
+        enableHeadstage (5, true, 2, 32);
+
+        chipId.set (chipIdx++, CHIP_ID_GALVANI);
+
+    }
+    else
+    {
+        // Now, disable data streams where we did not find chips present.
+        int chipIdx = 0;
+
+        for (int hs = 0; hs < headstages.size(); ++hs)
+        {
+            if ((tmpChipId[hs] > 0) && (enabledStreams.size() < MAX_NUM_DATA_STREAMS))
+            {
+                chipId.set (chipIdx++, tmpChipId[hs]);
+
+                LOGD ("Enabling headstage ", hs);
+
+                if (tmpChipId[hs] == CHIP_ID_RHD2164) //RHD2164
+                {
+                    if (enabledStreams.size() < MAX_NUM_DATA_STREAMS - 1)
+                    {
+                        enableHeadstage (hs, true, 2, 32);
+                        chipId.set (chipIdx++, CHIP_ID_RHD2164_B);
+                    }
+                    else //just one stream left
+                    {
+                        enableHeadstage (hs, true, 1, 32);
+                    }
+                }
+                else
+                {
+                    enableHeadstage (hs, true, 1, tmpChipId[hs] == 1 ? 32 : 16);
+                }
+            }
+            else
+            {
+                enableHeadstage (hs, false);
+            }
+        }
+
+        //For now, since G3 has no deviceID we force it to be disabled. In the future if G3 is used to record
+        //along side Intan we can reanable this
+        enableHeadstage (4, false, 2, 32);
+        enableHeadstage (5, false, 2, 32);
+    }
+
+
 
     updateBoardStreams();
 
@@ -1381,6 +1552,10 @@ bool DeviceThread::stopAcquisition()
     std::cout << "RHD2000 data thread stopping acquisition." << std::endl;
     usbThread->stopAcquisition();
 
+    //stop stimulation
+    evalBoard->stopStim();
+
+
     if (isThreadRunning())
     {
         signalThreadShouldExit();
@@ -1536,7 +1711,7 @@ bool DeviceThread::updateBuffer()
         uint16 inputTTLWord = *((uint16*) (bufferPtr + index));
 
         uint64 ttlEventWord = 0;
-        // Put input TTL bits [0..6] into ttlEventWord bits [0..6]
+        // Put input TTL bits [0..6] into ttlEventWord bits [0..6] 
         ttlEventWord |= (uint64) (inputTTLWord & 0x7F); // 0x7F = 0b01111111
 
         // Compute whether stim is happening
@@ -1761,7 +1936,7 @@ void DeviceThread::runImpedanceTest()
 
 
 //GALVANI 3
-void DeviceThread::uploadStimParameters (int amplitude, int period, int pulse_width, int edge_sel, int pulse_count, int enabledLEDS[64])
+void DeviceThread::uploadStimParameters (int amplitude, int period, int pulse_width, int edge_sel, int pulse_count, int trig_source, int enabledLEDS[64])
 {
     LOGD ("UPLOADING STIM PARAMETERS")
     LOGD ("WAVEFORM 0")
@@ -1770,6 +1945,7 @@ void DeviceThread::uploadStimParameters (int amplitude, int period, int pulse_wi
     LOGD ("pulse_width: ", pulse_width)
     LOGD ("edge_sel: ", edge_sel)
     LOGD ("pulse_count: ", pulse_count)
+    LOGD ("trigger: ", trig_source) //PC 0, external 1
 
     //Need to scale the values given depending on the current sample rate of the system
     int scale = (evalBoard->getSampleRate() / 1000);
@@ -1784,7 +1960,7 @@ void DeviceThread::uploadStimParameters (int amplitude, int period, int pulse_wi
 
     for (int i = 0; i < 64; i++)
     {
-        evalBoard->setStimChannel (i, 0, 0, 0, enabledLEDS[i]);
+        evalBoard->setStimChannel (i, 0, 0, trig_source, enabledLEDS[i]);
     }
 }
 

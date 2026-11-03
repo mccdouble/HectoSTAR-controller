@@ -89,6 +89,7 @@ private:
     //G3 Chip Stim Specific
     //galvani 3 waveform parameters
     int amplitude = 0, period = 0, pulse_width = 0, edge_sel = 0, pulse_count = 0;
+    int trig_source = 1; //default is PC trigger.
     int repeatCount = 0;
 
     //Probe Geometry Selection (defaults to 4 shank)
@@ -116,6 +117,8 @@ private:
     std::unique_ptr<TextEditor> pulseWidthInput;
     std::unique_ptr<ComboBox> edgeSelectBox;
     std::unique_ptr<TextEditor> pulseCountInput;
+    std::unique_ptr<ComboBox> triggerSelectBox;
+
 
     int enabledLEDS[64];
 
@@ -128,24 +131,27 @@ private:
     std::unique_ptr<Label> patternOutputLabel;
 
     //**G3 LED Channel Mapping array
+    //default
     int ledMapping[64] = {16, 31, 17, 30, 18, 29, 19, 28, 20, 27, 21, 26, 22, 25, 23, 24, 0, 15, 1,
         14, 2, 13, 3, 12, 4, 11, 5, 10, 6, 9, 7, 8, 47, 32, 46, 33, 45, 34, 44, 35, 43, 36, 42, 37,
         41, 38, 40, 39, 63, 48, 62, 49, 61, 50, 60, 51, 59, 52, 58, 53, 57, 54, 56, 55 };
 
     //chronic 4 shank mapping.     
-    int four_Shank_mapping[64] = {16, 31, 17, 30, 18, 29, 19, 28, 20, 27, 21, 26, 22, 25, 23, 24, 0, 15, 1,
+    int four_Shank_Chronic_mapping[64] = {16, 31, 17, 30, 18, 29, 19, 28, 20, 27, 21, 26, 22, 25, 23, 24, 0, 15, 1,
         14, 2, 13, 3, 12, 4, 11, 5, 10, 6, 9, 7, 8, 47, 32, 46, 33, 45, 34, 44, 35, 43, 36, 42, 37,
         41, 38, 40, 39, 63, 48, 62, 49, 61, 50, 60, 51, 59, 52, 58, 53, 57, 54, 56, 55 };
 
-    //THIS IS WRONG
-    int two_Shank_mapping[64] = { 16, 31, 17, 30, 18, 29, 19, 28, 20, 27, 21, 26, 22, 25, 23, 24, 0, 15, 1,
-        14, 2, 13, 3, 12, 4, 11, 5, 10, 6, 9, 7, 8, 47, 32, 46, 33, 45, 34, 44, 35, 43, 36, 42, 37,
-        41, 38, 40, 39, 63, 48, 62, 49, 61, 50, 60, 51, 59, 52, 58, 53, 57, 54, 56, 55 };
+    //chronic 2 shank mapping.  
+    int two_Shank_Chronic_mapping[64] = {0, 31, 1, 30, 2, 29, 3, 28, 4, 27, 5, 26, 6, 25, 7, 24,
+                     8, 23, 9, 22, 10, 21, 11, 20, 12, 19, 13, 18, 14, 17, 15, 16,
+                     63, 32, 62, 33, 61, 34, 60, 35, 59, 36, 58, 37, 57, 38, 56, 39,
+                     55, 40, 54, 41, 53, 42, 52, 43, 51, 44, 50, 45, 49, 46, 48, 47};
     
-    //THIS IS WRONG;
-    int one_Shank_mapping[64] = { 16, 31, 17, 30, 18, 29, 19, 28, 20, 27, 21, 26, 22, 25, 23, 24, 0, 15, 1,
-        14, 2, 13, 3, 12, 4, 11, 5, 10, 6, 9, 7, 8, 47, 32, 46, 33, 45, 34, 44, 35, 43, 36, 42, 37,
-        41, 38, 40, 39, 63, 48, 62, 49, 61, 50, 60, 51, 59, 52, 58, 53, 57, 54, 56, 55 };
+    //acute 4 shank mapping.  
+    int four_Shank_Acute_mapping[64] = {48, 63, 49, 62, 50, 61, 51, 60, 52, 59, 53, 58, 54, 57, 55, 56,
+                  47, 32, 46, 33, 45, 34, 44, 35, 43, 36, 42, 37, 41, 38, 40, 39,
+                  0, 15, 1, 14, 2, 13, 3, 12, 4, 11, 5, 10, 6, 9, 7, 8,
+                  31, 16, 30, 17, 29, 18, 28, 19, 27, 20, 26, 21, 25, 22, 24, 23};
 
     int demo_Board_mapping[64] = {15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0,
                     31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16,

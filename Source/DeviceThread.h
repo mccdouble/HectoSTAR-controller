@@ -209,7 +209,7 @@ public:
 
 
     //galvani 3 stimulation functions
-    void uploadStimParameters (int amplitude, int period, int pulse_width, int edge_sel, int pulse_count, int enableLEDS[64]);
+    void uploadStimParameters (int amplitude, int period, int pulse_width, int edge_sel, int pulse_count, int trig_source, int enableLEDS[64]);
     void startStim();
     void stopStim();
     void ledTestSequence (int led);

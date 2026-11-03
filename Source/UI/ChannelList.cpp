@@ -40,10 +40,13 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
 
     //label for stim output selection (Pulse or Pattern).
     probeTypeSelect = std::make_unique<ComboBox> ("Probe Select");
-    probeTypeSelect->addItem ("4-Shank", 1);
-    probeTypeSelect->addItem ("2-Shank", 2);
-    probeTypeSelect->addItem ("1-Shank", 3);
+    probeTypeSelect->addItem ("4-Shank Chronic", 1);
+    probeTypeSelect->addItem ("2-Shank Chronic", 2);
+    probeTypeSelect->addItem ("4-Shank Acute", 3);
     probeTypeSelect->addItem ("Demo Board", 4);
+
+    //add in future, all other possible configs.
+
     probeTypeSelect->setBounds (10, 10, 100, 25);
     probeTypeSelect->addListener (this);
     probeTypeSelect->setSelectedId (1, dontSendNotification);
@@ -86,7 +89,7 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
     addAndMakeVisible (repeatLabel.get());
 
     //waveform input labels
-    waveformInputLabel = std::make_unique<Label> ("Waveform Labels", "Amplitude(uA)    Period(ms)     Pulse Width(ms)    Rise/Fall Time    #Pulses");
+    waveformInputLabel = std::make_unique<Label> ("Waveform Labels", "Amplitude(uA)    Period(ms)     Pulse Width(ms)    Rise/Fall Time    #Pulses   Trigger Type");
     waveformInputLabel->setEditable (false);
     waveformInputLabel->setBounds (10, 50, 800, 25);
     addAndMakeVisible (waveformInputLabel.get());
@@ -128,16 +131,16 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
     addAndMakeVisible (pulseCountInput.get());
 
     //trigger select (PC, EXTERNAL)
-    //triggerSelectBox = new ComboBox("Trigger Type");
-    // triggerSelectBox->addItem("PC", 1);
-    // triggerSelectBox->addItem("TTL IN 0", 2);
-    // triggerSelectBox->addItem("TTL IN 1", 3);
-    // triggerSelectBox->addItem("TTL IN 2", 4);
-    // triggerSelectBox->addItem("TTL IN 3", 5);
-    // triggerSelectBox->setBounds(590, 75, 80, 25);
-    // triggerSelectBox->addListener(this);
-    // triggerSelectBox->setSelectedId(1, dontSendNotification);
-    // triggerSelectBox(edgeSelectBox);
+    triggerSelectBox = std::make_unique<ComboBox> ("Trigger Type");
+    triggerSelectBox->addItem("PC", 1);
+    triggerSelectBox->addItem("TTL IN 0", 2);
+    //triggerSelectBox->addItem("TTL IN 1", 2);
+    //triggerSelectBox->addItem("TTL IN 2", 3);
+    //triggerSelectBox->addItem("TTL IN 3", 4);
+    triggerSelectBox->setBounds(610, 75, 80, 25);
+    triggerSelectBox->addListener(this);
+    triggerSelectBox->setSelectedId(1, dontSendNotification);
+    addAndMakeVisible (triggerSelectBox.get());
 
     //Initialize the led toggle buttons
     for (int i = 0; i < 64; ++i)
@@ -255,7 +258,8 @@ void ChannelList::buttonClicked (Button* btn)
                 }
             }
 
-            board->uploadStimParameters(amplitude, period, pulse_width, edge_sel, pulse_count, enabledLEDS);
+            //trig source is 0 indexed on fpga
+            board->uploadStimParameters (amplitude, period, pulse_width, edge_sel, pulse_count, (trig_source-1), enabledLEDS);
         }
         //pattern stim is selected
         else
@@ -347,7 +351,15 @@ void ChannelList::enableAll()
 
 void ChannelList::comboBoxChanged (ComboBox* b)
 {
-    if (b == outputTypeSelect.get())
+
+    //pulse waveform trigger selection.
+    if (b == triggerSelectBox.get())
+    {
+        trig_source = b->getSelectedId();
+    }
+
+    //pulse or pattern stim.
+    else if (b == outputTypeSelect.get())
     {
         selectedStimOutputType = (b->getSelectedId() == 2); //pulse out is 1, pattern out is 2
         board->setStimOutputType(selectedStimOutputType);
@@ -378,32 +390,32 @@ void ChannelList::comboBoxChanged (ComboBox* b)
     {
         const int probeGeometry = b->getSelectedId();
 
-        if (probeGeometry == 1) // 4-Shank
+        if (probeGeometry == 1) // 4-Shank Chronic
         {
             shankCount = 4;
             buttonCountPerShank = 16; 
             for (int i = 0; i < 64; i++)
             {
-                ledMapping[i] = four_Shank_mapping[i];
+                ledMapping[i] = four_Shank_Chronic_mapping[i];
             }
 
         }
-        else if (probeGeometry == 2) // 2-Shank
+        else if (probeGeometry == 2) // 2-Shank Chronic
         {
             shankCount = 2;
             buttonCountPerShank = 32;
             for (int i = 0; i < 64; i++)
             {
-                ledMapping[i] = two_Shank_mapping[i];
+                ledMapping[i] = two_Shank_Chronic_mapping[i];
             }
         }
-        else if (probeGeometry == 3) // 1-Shank
+        else if (probeGeometry == 3) // 4 Shank Acute
         {
-            shankCount = 1;
-            buttonCountPerShank = 32;
+            shankCount = 4;
+            buttonCountPerShank = 16; 
             for (int i = 0; i < 64; i++)
             {
-                ledMapping[i] = one_Shank_mapping[i];
+                ledMapping[i] = four_Shank_Acute_mapping[i];
             }
         }
         else if (probeGeometry == 4) // Demo Board (choose behavior)
@@ -493,7 +505,6 @@ void ChannelList::update()
     repaint();
 }
 
-
 void ChannelList::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colours::grey);
@@ -511,7 +522,7 @@ void ChannelList::paint (juce::Graphics& g)
 
     const int lanesVisible = (shankCount == 1 ? 2 : 4);
 
-    // Keep electrode drawing simple in this visual: 32 electrodes per lane like 4-shank spacing
+    // 32 electrodes per drawn lane/block
     const int electrodesPerLane = 32;
     const float electrodeSize = 7.0f;
     const int positionsAlongY = electrodesPerLane / 2;
@@ -537,8 +548,10 @@ void ChannelList::paint (juce::Graphics& g)
     {
         if (shankCount == 4)
             return true; // all pointy
+
         if (shankCount == 2)
             return (lane == 0 || lane == 2); // only bottom halves
+
         return (lane == 0); // 1-shank: only S1B
     };
 
@@ -546,8 +559,10 @@ void ChannelList::paint (juce::Graphics& g)
     {
         if (shankCount == 2)
             return (lane == 0 || lane == 2); // top of S1B/S2B
+
         if (shankCount == 1)
             return (lane == 0); // top of S1B
+
         return false;
     };
 
@@ -555,8 +570,10 @@ void ChannelList::paint (juce::Graphics& g)
     {
         if (shankCount == 2)
             return (lane == 1 || lane == 3); // bottom of S1T/S2T
+
         if (shankCount == 1)
             return (lane == 1); // bottom of S1T
+
         return false;
     };
 
@@ -587,13 +604,85 @@ void ChannelList::paint (juce::Graphics& g)
         outline.lineTo (x + w, y + h - (w * 0.5f));
         outline.lineTo (x + w, y);
         outline.closeSubPath();
+
         g.strokePath (outline, juce::PathStrokeType (strokeW));
+    };
+
+    // Converts the current drawing index j into a 1-based electrode position
+    // ordered from top-to-bottom, with top-left = 1, top-right = 2, etc.
+    auto topToBottomIndex = [positionsAlongY] (int j) -> int
+    {
+        const bool isLeft = (j % 2 == 0);
+
+        const int pairFromBottom = j / 2;
+        const int rowFromTop = (positionsAlongY - 1) - pairFromBottom;
+
+        return rowFromTop * 2 + (isLeft ? 1 : 2);
+    };
+
+    auto electrodeNumberForLane = [this, electrodesPerLane, topToBottomIndex] (int lane, int j) -> int
+    {
+        const int n = topToBottomIndex (j); // 1..32, top-to-bottom within lane
+
+        if (shankCount == 4)
+        {
+            // S1:  1..32
+            // S2:  33..64
+            // S3:  65..96
+            // S4:  97..128
+            return lane * electrodesPerLane + n;
+        }
+
+        if (shankCount == 2)
+        {
+            // lanes:
+            // 0 = S1B
+            // 1 = S1T
+            // 2 = S2B
+            // 3 = S2T
+            switch (lane)
+            {
+                case 0:
+                    return 32 + n; // S1B: 33..64, top-to-bottom
+                case 1:
+                    return n; // S1T: 1..32, top-to-bottom
+
+                case 2:
+                    return 96 + n; // S2B: 128..97, top-to-bottom
+                case 3:
+                    return 64 + n; // S2T: 96..65, top-to-bottom
+
+                default:
+                    break;
+            }
+        }
+
+        if (shankCount == 1)
+        {
+            // lanes:
+            // 0 = S1B
+            // 1 = S1T
+            switch (lane)
+            {
+                case 0:
+                    return 32 + n; // S1B: 33..64, top-to-bottom
+                case 1:
+                    return n; // S1T: 1..32, top-to-bottom
+
+                default:
+                    break;
+            }
+        }
+
+        return n;
     };
 
     for (int lane = 0; lane < lanesVisible; ++lane)
     {
         const float x = startX + lane * (shankW + gap);
         const float y = startY;
+
+        g.setColour (juce::Colours::black);
 
         if (laneHasPointyTip (lane))
             drawPointyShank (x, y, shankW, shankH);
@@ -614,10 +703,8 @@ void ChannelList::paint (juce::Graphics& g)
                     20,
                     juce::Justification::centredTop);
 
-        // Electrodes (visual aid): bottom is lowest number in this lane block
-        const int baseIndex = lane * electrodesPerLane;
-
         g.setFont (10.0f);
+
         for (int j = 0; j < electrodesPerLane; ++j)
         {
             const bool isLeft = (j % 2 == 0);
@@ -637,34 +724,38 @@ void ChannelList::paint (juce::Graphics& g)
             g.setColour (juce::Colours::black);
             g.fillRect (ex, ey, electrodeSize, electrodeSize);
 
-            const int electrodeNumber = baseIndex + (j + 1);
+            const int electrodeNumber = electrodeNumberForLane (lane, j);
+
             g.drawText ("E" + juce::String (electrodeNumber),
-                        (int) (ex - 12.0f),
+                        (int) (ex - 12.0f), 
                         (int) (ey - 12.0f),
                         34,
                         12,
                         juce::Justification::centredLeft);
         }
-    }
- 
-   // Disclaimer below probe
+    } 
+
+    // Disclaimer below probe
     const int disclaimerX = 30;
     const int disclaimerW = juce::jmax (200, getWidth() - 60);
 
     const int disclaimerY1 = (int) std::round (startY + shankH + 30.0f);
     const int disclaimerY2 = disclaimerY1 + 20;
 
+    g.setColour (juce::Colours::black);
     g.setFont (12.0f);
+
     g.drawText ("NOTE: Probe overlay is an approximate visual aid. Please refer to the ",
                 disclaimerX,
                 disclaimerY1,
                 disclaimerW,
                 14,
                 juce::Justification::left);
+
     g.drawText ("specific probe geometry for exact LED and Electrodes spacing/location.",
                 disclaimerX,
                 disclaimerY2,
                 disclaimerW,
                 14,
                 juce::Justification::left);
-    }
+}
