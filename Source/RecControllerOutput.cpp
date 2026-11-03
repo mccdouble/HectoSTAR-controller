@@ -85,7 +85,7 @@ void RecControllerOutput::parameterValueChanged (Parameter* param)
         if (stream != nullptr)
         {
             auto ttlOut = ((TtlLineParameter*) stream->getParameter ("ttl_out"))->getSelectedLine() + 1;
-            broadcastMessage ("RHDCONTROL TRIGGER "
+            broadcastMessage ("HECTOSTAR TRIGGER "
                               + String (ttlOut)
                               + " "
                               + getParameter ("event_duration")->getValue().toString());
@@ -120,7 +120,7 @@ void RecControllerOutput::handleTTLEvent (TTLEventPtr event)
             if (event->getState())
             {
                 auto ttlOut = ((TtlLineParameter*) stream->getParameter ("ttl_out"))->getSelectedLine() + 1;
-                String msg = "RHDCONTROL TRIGGER "
+                String msg = "HECTOSTAR TRIGGER "
                              + String (ttlOut)
                              + " "
                              + (*stream)["event_duration"].toString();

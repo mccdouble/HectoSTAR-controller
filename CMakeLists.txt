@@ -8,7 +8,9 @@ if (NOT DEFINED GUI_BASE_DIR)
 endif()
 
 get_filename_component(PROJECT_FOLDER ${CMAKE_CURRENT_SOURCE_DIR} ABSOLUTE)
-get_filename_component(PLUGIN_NAME ${PROJECT_FOLDER} NAME)
+# Fixed name (not the folder name) so this never collides with the stock
+# RHD Recording Controller plugin it was derived from.
+set(PLUGIN_NAME HectoSTAR-controller)
 
 set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "Build architecture for Mac OS X" FORCE)
 
