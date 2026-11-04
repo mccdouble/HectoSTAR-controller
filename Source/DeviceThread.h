@@ -215,6 +215,13 @@ public:
     void ledTestSequence (int led);
     //Blocking (erases + writes flash). Call from a background thread, not the message thread.
     int uploadPatternFile (File patternStimFile, std::function<void (double)> progress = nullptr);
+
+    //Non-blocking: writes the pattern file to flash on a background thread owned by this
+    //DeviceThread (so the board outlives the upload). onComplete runs on the message thread.
+    //Returns false if an upload is already running.
+    bool startPatternUpload (File patternStimFile, std::function<void (bool)> onComplete);
+    bool isPatternUploadRunning() const;
+    double getPatternUploadProgress() const; // 0.0 - 1.0
     void setPatternStimRepeatCount (int count);
     void setStimOutputType (int outputSelection);
 
@@ -288,6 +295,9 @@ private:
     float auxSamples[MAX_NUM_DATA_STREAMS][3];
 
     std::unique_ptr<USBThread> usbThread;
+
+    class PatternUploadThread;
+    std::unique_ptr<PatternUploadThread> patternUploader;
 
     unsigned int blockSize;
 

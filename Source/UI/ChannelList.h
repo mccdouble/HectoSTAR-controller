@@ -44,7 +44,7 @@ public:
                  DeviceEditor* editor);
 
     /** Destructor */
-    ~ChannelList() {}
+    ~ChannelList() override;
 
     /** Updates label colors */
     void lookAndFeelChanged() override;
@@ -108,6 +108,10 @@ private:
     //pattern stim params
     std::unique_ptr<ColourButton> selectPatternFileButton;
     std::unique_ptr<TextEditor> patternRepeatCount;
+
+    //non-modal progress window shown while a pattern file uploads
+    class PatternUploadWindow;
+    std::unique_ptr<PatternUploadWindow> uploadWindow;
     std::unique_ptr<Label> repeatLabel;
 
     //pulse stim params

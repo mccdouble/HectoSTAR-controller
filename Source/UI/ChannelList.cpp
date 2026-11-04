@@ -31,6 +31,63 @@
 
 using namespace RhythmNode;
 
+/** Small always-on-top window showing pattern upload progress. Not modal, so the rest
+    of the GUI (other plugins, LFP viewer, etc.) stays usable while flash is written. */
+class ChannelList::PatternUploadWindow : public DocumentWindow,
+                                         private Timer
+{
+public:
+    PatternUploadWindow (DeviceThread* board_, const File& file, Component* centreAround)
+        : DocumentWindow ("Uploading pattern stim file",
+                          LookAndFeel::getDefaultLookAndFeel().findColour (ResizableWindow::backgroundColourId),
+                          0), // no close/minimise buttons; it closes itself when the upload finishes
+          board (board_)
+    {
+        setContentOwned (new Content (file.getFileName() + " (" + String (file.getSize()) + " bytes)", progress), true);
+        setResizable (false, false);
+        setAlwaysOnTop (true);
+        centreAroundComponent (centreAround, getWidth(), getHeight());
+        setVisible (true);
+        startTimerHz (10);
+    }
+
+private:
+    class Content : public Component
+    {
+    public:
+        Content (const String& text, double& progress) : bar (progress)
+        {
+            label.setText (text, dontSendNotification);
+            label.setJustificationType (Justification::centred);
+            addAndMakeVisible (label);
+            addAndMakeVisible (bar);
+            setSize (340, 80);
+        }
+
+        void resized() override
+        {
+            auto area = getLocalBounds().reduced (10);
+            label.setBounds (area.removeFromTop (24));
+            area.removeFromTop (8);
+            bar.setBounds (area.removeFromTop (24));
+        }
+
+    private:
+        Label label;
+        ProgressBar bar;
+    };
+
+    void timerCallback() override
+    {
+        progress = board->getPatternUploadProgress();
+    }
+
+    DeviceThread* board;
+    double progress = 0.0; // read by the ProgressBar on the message thread
+};
+
+ChannelList::~ChannelList() = default;
+
 ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (board_), editor (editor_), maxChannels (0)
 {
     channelComponents.clear();
@@ -207,51 +264,6 @@ void ChannelList::lookAndFeelChanged()
     update();
 }
 
-/** Writes a pattern stim file to flash on a background thread so the GUI and
-    acquisition don't stall. Shows a progress window and deletes itself when done. */
-class PatternUploadTask : public ThreadWithProgressWindow
-{
-public:
-    PatternUploadTask (DeviceThread* board_, File file_, std::function<void (bool)> onComplete_)
-        : ThreadWithProgressWindow ("Uploading pattern stim file", true, false),
-          board (board_),
-          file (file_),
-          onComplete (std::move (onComplete_))
-    {
-        setStatusMessage (file.getFileName() + " (" + String (file.getSize()) + " bytes)");
-    }
-
-    void run() override
-    {
-        result = board->uploadPatternFile (file, [this] (double p)
-                                           { setProgress (p); });
-    }
-
-    void threadComplete (bool /*userPressedCancel*/) override
-    {
-        const bool ok = (result >= 0);
-        String message = (ok ? "File upload completed!\nFile Name: " : "File upload FAILED!\nFile Name: ") + file.getFileName();
-
-        if (ok)
-            message += "\nFile Length: " + String (file.getSize()) + " bytes";
-
-        AlertWindow::showMessageBoxAsync (ok ? AlertWindow::InfoIcon : AlertWindow::WarningIcon,
-                                          ok ? "Upload Successful" : "Upload Failed",
-                                          message);
-
-        if (onComplete)
-            onComplete (ok);
-
-        delete this;
-    }
-
-private:
-    DeviceThread* board;
-    File file;
-    std::function<void (bool)> onComplete;
-    std::atomic<int> result { -1 };
-};
-
 void ChannelList::buttonClicked (Button* btn)
 {
   
@@ -328,22 +340,38 @@ void ChannelList::buttonClicked (Button* btn)
 
         {
             File chosenFile = fileChooser.getResult();
-
-            // Upload in the background; block re-entry until it finishes.
-            selectPatternFileButton->setEnabled (false);
-            uploadStimParamButton->setEnabled (false);
+            const String fileName = chosenFile.getFileName();
+            const int64 fileSize = chosenFile.getSize();
 
             Component::SafePointer<ChannelList> safeThis (this);
 
-            auto* task = new PatternUploadTask (board, chosenFile, [safeThis] (bool)
-                                                {
-                                                    if (safeThis != nullptr)
-                                                    {
-                                                        safeThis->selectPatternFileButton->setEnabled (true);
-                                                        safeThis->uploadStimParamButton->setEnabled (true);
-                                                    }
-                                                });
-            task->launchThread();
+            // Upload in the background (owned by the DeviceThread); the GUI stays usable.
+            const bool started = board->startPatternUpload (chosenFile, [safeThis, fileName, fileSize] (bool ok)
+                                                            {
+                                                                String message = (ok ? "File upload completed!\nFile Name: " : "File upload FAILED!\nFile Name: ") + fileName;
+
+                                                                if (ok)
+                                                                    message += "\nFile Length: " + String (fileSize) + " bytes";
+
+                                                                AlertWindow::showMessageBoxAsync (ok ? AlertWindow::InfoIcon : AlertWindow::WarningIcon,
+                                                                                                  ok ? "Upload Successful" : "Upload Failed",
+                                                                                                  message);
+
+                                                                if (safeThis != nullptr)
+                                                                {
+                                                                    safeThis->uploadWindow.reset();
+                                                                    safeThis->selectPatternFileButton->setEnabled (true);
+                                                                    safeThis->uploadStimParamButton->setEnabled (true);
+                                                                }
+                                                            });
+
+            if (started)
+            {
+                // block re-entry until it finishes
+                selectPatternFileButton->setEnabled (false);
+                uploadStimParamButton->setEnabled (false);
+                uploadWindow = std::make_unique<PatternUploadWindow> (board, chosenFile, this);
+            }
         }
     }
 
@@ -384,8 +412,9 @@ void ChannelList::disableAll()
 
 void ChannelList::enableAll()
 {
-    uploadStimParamButton->setEnabled (true);
-    selectPatternFileButton->setEnabled (true);
+    const bool uploading = board->isPatternUploadRunning();
+    uploadStimParamButton->setEnabled (! uploading);
+    selectPatternFileButton->setEnabled (! uploading);
 
     //Initialize the led toggle buttons
     for (int i = 0; i < 64; ++i)
@@ -488,7 +517,7 @@ void ChannelList::update()
 
     staticLabels.clear();
     channelComponents.clear();
-    uploadStimParamButton->setEnabled (true);
+    uploadStimParamButton->setEnabled (! board->isPatternUploadRunning());
 
     // ---- FIXED LED GEOMETRY: always use 4-lane spacing ----
     const int ledsPerLane = 16; // fixed for 4-shank spacing

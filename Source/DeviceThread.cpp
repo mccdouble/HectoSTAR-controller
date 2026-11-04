@@ -51,6 +51,39 @@ using namespace RhythmNode;
 
 #define INIT_STEP 128 
 
+class DeviceThread::PatternUploadThread : public Thread
+{
+public:
+    PatternUploadThread (DeviceThread* board_, File file_, std::function<void (bool)> onComplete_)
+        : Thread ("Pattern stim upload"),
+          board (board_),
+          file (file_),
+          onComplete (std::move (onComplete_))
+    {
+    }
+
+    void run() override
+    {
+        //not interruptible: stopping mid-write would leave a partial pattern in flash
+        const bool ok = board->uploadPatternFile (file, [this] (double p)
+                                                  { progress = p; })
+                        >= 0;
+
+        MessageManager::callAsync ([callback = onComplete, ok]
+                                   {
+                                       if (callback)
+                                           callback (ok);
+                                   });
+    }
+
+    std::atomic<double> progress { 0.0 };
+
+private:
+    DeviceThread* board;
+    File file;
+    std::function<void (bool)> onComplete;
+};
+
 DataThread* DeviceThread::createDataThread (SourceNode* sn)
 {
     return new DeviceThread (sn);
@@ -129,6 +162,10 @@ DeviceThread::DeviceThread (SourceNode* sn) : DataThread (sn),
 DeviceThread::~DeviceThread()
 {
     LOGD ("RHD2000 interface destroyed.");
+
+    //never reset the board or free it mid flash write
+    if (patternUploader != nullptr)
+        patternUploader->waitForThreadToExit (-1);
 
     if (deviceFound)
         evalBoard->resetFpga();
@@ -2002,6 +2039,26 @@ int DeviceThread::uploadPatternFile (File patternStimFile, std::function<void (d
     evalBoard->stopStim();
 
     return evalBoard->trigWrite (filePath, file_size, progress);
+}
+
+bool DeviceThread::startPatternUpload (File patternStimFile, std::function<void (bool)> onComplete)
+{
+    if (isPatternUploadRunning())
+        return false;
+
+    patternUploader = std::make_unique<PatternUploadThread> (this, patternStimFile, std::move (onComplete));
+    patternUploader->startThread();
+    return true;
+}
+
+bool DeviceThread::isPatternUploadRunning() const
+{
+    return patternUploader != nullptr && patternUploader->isThreadRunning();
+}
+
+double DeviceThread::getPatternUploadProgress() const
+{
+    return patternUploader != nullptr ? patternUploader->progress.load() : 0.0;
 }
 
 void DeviceThread::setPatternStimRepeatCount (int count)
