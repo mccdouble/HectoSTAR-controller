@@ -187,7 +187,8 @@ private:
     void updateBoardStatus();
     void changeListenerCallback (ChangeBroadcaster*) override;
 
-    void uploadPattern();
+    void uploadPattern();      // asks for confirmation, then startPatternUpload
+    void startPatternUpload();
 
     //non-modal progress window shown while a pattern file uploads
     class PatternUploadWindow;

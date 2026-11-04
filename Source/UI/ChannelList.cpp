@@ -61,6 +61,8 @@ private:
         {
             label.setText (text, dontSendNotification);
             label.setJustificationType (Justification::centred);
+            label.setColour (Label::textColourId, Colours::white); // the window background is dark
+            label.setFont (FontOptions (14.0f));
             addAndMakeVisible (label);
             addAndMakeVisible (bar);
             setSize (340, 80);
@@ -803,6 +805,47 @@ void ChannelList::updateBoardStatus()
 }
 
 void ChannelList::uploadPattern()
+{
+    if (! board->foundInputSource())
+    {
+        AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Upload pattern", "No HectoSTAR controller is connected.");
+        return;
+    }
+
+    const auto version = patternDoc->contentVersion();
+    const auto& pat = patternDoc->pattern();
+    const int repeats = pat.repeatCount;
+
+    // confirm first: what will play, how often, and for how long
+    std::set<int> leds;
+    for (const auto& b : pat.blocks)
+        leds.insert (b.led);
+
+    auto seconds = [] (double s)
+    {
+        return s < 1.0 ? String (s * 1000.0, 1) + " ms" : String (s, 3) + " s";
+    };
+
+    String msg;
+    msg << "Pattern length: " << seconds (pat.duration) << "\n"
+        << "Plays " << repeats << (repeats == 1 ? " time" : " times")
+        << " (total " << seconds (pat.duration * repeats) << ")\n"
+        << "LEDs: " << (int) leds.size() << (leds.empty() ? String() : "  (" + formatLedRange (leds) + ")") << "\n"
+        << "Waveform blocks: " << (int) pat.blocks.size() << "\n"
+        << "Trigger: " << triggerSelectBox->getText() << "\n\n"
+        << (version == flashVersion ? "The board already has this pattern; only the repeat count is sent."
+                                    : "The pattern is written to the board's flash.");
+
+    Component::SafePointer<ChannelList> safeConfirm (this);
+    AlertWindow::showOkCancelBox (AlertWindow::QuestionIcon, "Upload pattern?", msg, "Upload", "Cancel", this,
+                                  ModalCallbackFunction::create ([safeConfirm] (int result)
+                                                                 {
+                                                                     if (result != 0 && safeConfirm != nullptr)
+                                                                         safeConfirm->startPatternUpload();
+                                                                 }));
+}
+
+void ChannelList::startPatternUpload()
 {
     if (! board->foundInputSource())
     {
