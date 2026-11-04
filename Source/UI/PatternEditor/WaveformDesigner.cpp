@@ -55,9 +55,9 @@ ParamDesc paramDesc (const WaveSpec& w, int i)
         switch (i)
         {
             case 0: return { w.shaped.equalCharge ? "Square equiv. (uA)" : "Peak (uA)", 1 };
-            case 1: return { cycles ? "Cycle (ms)" : "Width (ms)", 1000 };
-            case 2: return { cycles ? "Cycles" : "Pulses", 1 };
-            case 3: return { "Rate (Hz)", 1 };
+            case 1: return { cycles ? "Cycle (ms)" : "Pulse width (ms)", 1000 };
+            case 2: return { cycles ? "" : "Period (ms)", 1000 };
+            case 3: return { cycles ? "Cycles" : "Pulses", 1 };
             default: return { "Step (uA/pulse)", 1 };
         }
     }
@@ -76,8 +76,8 @@ double* paramPtr (WaveSpec& w, int i)
         {
             case 0: return &w.shaped.amp;
             case 1: return &w.shaped.width;
-            case 2: return &w.shaped.count;
-            case 3: return &w.shaped.rate;
+            case 2: return &w.shaped.period;
+            case 3: return &w.shaped.count;
             default: return &w.shaped.step;
         }
     }
@@ -367,10 +367,13 @@ void WaveformDesigner::choose (int idx)
 
     if (c.wave.kind == WaveKind::Shaped && working.wave.kind == WaveKind::Shaped)
     {
-        // switching shape keeps the amplitude, width, count and rate
+        // switching shape keeps the amplitude, width, period and count
+        const bool fromSine = working.wave.shaped.shape == PulseShape::SineCycle;
         working.wave.shaped.shape = c.wave.shaped.shape;
         if (c.wave.shaped.shape == PulseShape::SineCycle && shapedCount (working.wave.shaped) > 1)
-            working.wave.shaped.width = 1.0 / jmax (1.0e-3, working.wave.shaped.rate); // continuous sine
+            working.wave.shaped.width = working.wave.shaped.period; // one cycle per period: a continuous sine
+        else if (fromSine)
+            working.wave.shaped = c.wave.shaped; // sine cycles have no gap: start from the shape's defaults
     }
     else
     {
@@ -460,8 +463,8 @@ void WaveformDesigner::updateVisibility()
     for (int i = 0; i < 5; ++i)
     {
         bool used = paramDesc (working.wave, i).label[0] != 0;
-        if (used && k == WaveKind::Shaped && i == 3)
-            used = shapedCount (working.wave.shaped) > 1; // rate only matters with several pulses
+        if (used && k == WaveKind::Shaped && i == 2)
+            used = shapedCount (working.wave.shaped) > 1; // the period only matters with several pulses
         paramLabels[(std::size_t) i].setVisible (used);
         paramEditors[(std::size_t) i].setVisible (used);
     }

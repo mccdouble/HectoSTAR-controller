@@ -587,7 +587,7 @@ void ChannelList::updatePulsePreview()
     t.amp = amplitudeInput->getText().getIntValue();
     t.width = widthMs / 1000.0;
     t.count = count;
-    t.rate = 1.0 / period;
+    t.period = period;
 
     // one cycle = one period (pulse and the gap after it); whole = every pulse
     const bool whole = pulsePreview->showsWhole();

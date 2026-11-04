@@ -301,9 +301,9 @@ int shapedCount (const ShapedTrain& t)
 
 int shapedPeriodSamples (const ShapedTrain& t)
 {
-    if (shapedCount (t) <= 1 || ! std::isfinite (t.rate) || t.rate <= 0)
+    if (shapedCount (t) <= 1 || t.shape == PulseShape::SineCycle || ! std::isfinite (t.period) || t.period <= 0)
         return shapedPulseSamples (t);
-    return std::max (1, (int) std::llround (kSampleRateHz / std::max (t.rate, 1.0e-6)));
+    return std::max (1, (int) std::llround (std::min (t.period, 3600.0) * kSampleRateHz));
 }
 
 double shapedMaxPeak (const ShapedTrain& t)
@@ -469,11 +469,11 @@ std::vector<std::string> validate (const Pattern& pattern)
                 if (! std::isfinite (t.amp) || ! std::isfinite (t.width) || t.width <= 0 || ! std::isfinite (t.count) || t.count < 1
                     || ! std::isfinite (t.step))
                     problems.push_back (blockName (b) + ": amplitude, width and count must be valid numbers (width above 0, count 1 or more).");
-                else if (shapedCount (t) > 1 && (! std::isfinite (t.rate) || t.rate <= 0))
-                    problems.push_back (blockName (b) + ": rate must be above 0 Hz.");
+                else if (shapedCount (t) > 1 && t.shape != PulseShape::SineCycle && (! std::isfinite (t.period) || t.period <= 0))
+                    problems.push_back (blockName (b) + ": the period must be above 0 ms.");
                 else if (shapedCount (t) > 1 && shapedPulseSamples (t) > shapedPeriodSamples (t))
-                    problems.push_back (blockName (b) + ": pulses are longer (" + formatMs (t.width) + ") than the time between them ("
-                                        + formatMs (1.0 / t.rate) + " at " + formatNumberPlain (t.rate) + " Hz).");
+                    problems.push_back (blockName (b) + ": the pulse width (" + formatMs (t.width) + ") is longer than the period ("
+                                        + formatMs (t.period) + ").");
                 else if (shapedMaxPeak (t) > kMaxCurrentUa + 0.5)
                     problems.push_back (blockName (b) + ": needs a peak of " + formatNumberPlain (std::round (shapedMaxPeak (t)))
                                         + " uA, above the 100 uA limit" + (t.equalCharge ? " (to match the square-pulse charge)." : "."));
@@ -694,7 +694,7 @@ std::string toJson (const Pattern& pattern)
                 w.set ("amp", number (b.wave.shaped.amp));
                 w.set ("width", number (b.wave.shaped.width));
                 w.set ("count", number (b.wave.shaped.count));
-                w.set ("rate", number (b.wave.shaped.rate));
+                w.set ("period", number (b.wave.shaped.period));
                 if (b.wave.shaped.step != 0)
                     w.set ("step", number (b.wave.shaped.step));
                 if (b.wave.shaped.equalCharge)
@@ -816,7 +816,10 @@ bool fromJson (const std::string& text, Pattern& pattern, std::string& error)
                 b.wave.shaped.amp = w->getNumber ("amp", 0);
                 b.wave.shaped.width = w->getNumber ("width", 0.005);
                 b.wave.shaped.count = w->getNumber ("count", 1);
-                b.wave.shaped.rate = w->getNumber ("rate", 10);
+                if (w->get ("period") != nullptr)
+                    b.wave.shaped.period = w->getNumber ("period", 0.1);
+                else if (w->getNumber ("rate", 0) > 0) // early designs saved a rate in Hz
+                    b.wave.shaped.period = 1.0 / w->getNumber ("rate", 10);
                 b.wave.shaped.step = w->getNumber ("step", 0);
                 b.wave.shaped.equalCharge = w->getBool ("equalCharge", false);
             }

@@ -19,7 +19,7 @@ PatternDocument::PatternDocument()
     newBlockTemplate.wave.shaped.amp = 50;
     newBlockTemplate.wave.shaped.width = 0.005;
     newBlockTemplate.wave.shaped.count = 10;
-    newBlockTemplate.wave.shaped.rate = 10;
+    newBlockTemplate.wave.shaped.period = 0.1;
     newBlockTemplate.length = naturalLength (newBlockTemplate.wave);
 
     render();

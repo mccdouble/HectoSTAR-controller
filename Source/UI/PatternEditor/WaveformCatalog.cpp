@@ -45,7 +45,7 @@ WaveSpec shaped (PulseShape shape, double amp, double widthMs, int count, double
     w.shaped.amp = amp;
     w.shaped.width = widthMs / 1000.0;
     w.shaped.count = count;
-    w.shaped.rate = rate;
+    w.shaped.period = 1.0 / rate;
     w.shaped.step = step;
     w.shaped.equalCharge = equalCharge;
     return w;
@@ -72,7 +72,7 @@ const ShapeInfo kShapeInfo[] = {
     { PulseShape::HalfSine, "Half-sine", "One positive half of a sine: 0, up to the peak, back to 0 (\"positive-sinusoidal\")." },
     { PulseShape::RisingSine, "Rising quarter-sine", "Quarter sine from 0 up to the peak at the end (\"left-positive-sinusoidal\")." },
     { PulseShape::FallingSine, "Falling quarter-sine", "Quarter sine from the peak down to 0 (\"right-positive-sinusoidal\")." },
-    { PulseShape::SineCycle, "Sine cycles", "Whole sine cycles between 0 and the peak. Set the cycle length to 1 / rate for a continuous sine." },
+    { PulseShape::SineCycle, "Sine cycles", "Whole sine cycles between 0 and the peak, back to back: a continuous sine (8 Hz = 125 ms cycles)." },
 };
 
 WaveSpec points (std::vector<Breakpoint> p, bool repeat)
@@ -394,7 +394,7 @@ String describeWave (const Block& b)
             const int n = shapedCount (t);
             String s = shapeName (t.shape) + ", " + num (t.amp) + uA + (t.equalCharge ? " equiv." : "") + ", " + msText (t.width);
             if (n > 1)
-                s << " x " << n << " at " << num (t.rate) << " Hz";
+                s << " x " << n << (t.shape == PulseShape::SineCycle ? String() : " every " + msText (t.period));
             if (t.step != 0)
                 s << ", " << (t.step > 0 ? "+" : "") << num (t.step) << uA << "/pulse";
             return s;
@@ -529,8 +529,7 @@ String lengthDescription (const Block& b)
         if (count == 1)
             s << (cycles ? "  (one cycle)" : "  (one pulse)");
         else
-            s << "  (" << count << (cycles ? " cycles" : " pulses") << " at "
-              << String (t.rate, 3).trimCharactersAtEnd ("0").trimCharactersAtEnd (".") << " Hz)";
+            s << "  (" << count << (cycles ? " cycles" : " pulses, one every " + ms (t.period)) << ")";
         if (t.equalCharge)
             s << ",  peak " << String (shapedMaxPeak (t), 1).trimCharactersAtEnd ("0").trimCharactersAtEnd (".") << " " << kMicroAmps;
         return s;

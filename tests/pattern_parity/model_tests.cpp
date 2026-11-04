@@ -493,7 +493,7 @@ static void testShapedTrains()
     sq.amp = 50;
     sq.width = 0.005;
     sq.count = 10;
-    sq.rate = 20;
+    sq.period = 0.05;
     Pattern p;
     p.duration = 1;
     p.blocks.push_back (shapedBlock (1, 7, 0.1, sq));
@@ -582,7 +582,7 @@ static void testShapedTrains()
     g.amp = 33.5;
     g.width = 0.0125;
     g.count = 7;
-    g.rate = 13.5;
+    g.period = 0.075;
     g.step = -2;
     g.equalCharge = true;
     pj.blocks.push_back (shapedBlock (1, 5, 0.25, g));
@@ -591,7 +591,7 @@ static void testShapedTrains()
     CHECK (fromJson (toJson (pj), loaded, error), "load: %s", error.c_str());
     const auto& lg = loaded.blocks.at (0).wave;
     CHECK (lg.kind == WaveKind::Shaped && lg.shaped.shape == g.shape && lg.shaped.amp == g.amp && lg.shaped.width == g.width
-               && lg.shaped.count == g.count && lg.shaped.rate == g.rate && lg.shaped.step == g.step && lg.shaped.equalCharge,
+               && lg.shaped.count == g.count && lg.shaped.period == g.period && lg.shaped.step == g.step && lg.shaped.equalCharge,
            "shaped json round trip");
     CHECK (encode (loaded) == encode (pj), "shaped render after round trip");
 

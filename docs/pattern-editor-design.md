@@ -136,8 +136,8 @@ written with full precision; NaN/Inf parameters are written as `null`.
 ## Pulse shapes (shaped trains)
 
 The main waveform list is a dictionary of pulse shapes. Each block of this
-kind is a train: `count` pulses, one starting every `1/rate` s, each `width`
-s long, at `amp` uA peak (plus `step` uA per following pulse). With
+kind is a train, set like the pulse output: `count` pulses, one starting
+every `period` s, each `width` s long (sine cycles run back to back), at `amp` uA peak (plus `step` uA per following pulse). With
 `equalCharge`, the peak is scaled so each pulse carries the charge of a
 square pulse at `amp` (the iso-energy condition of the paper below); a
 pattern needing more than 100 uA is reported, not clipped.

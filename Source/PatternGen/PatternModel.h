@@ -71,15 +71,16 @@ enum class PulseShape
 
 constexpr int kNumPulseShapes = 13;
 
-/** A train of identical pulses: count pulses, one starting every 1/rate s,
-    each lasting width s with the given shape. */
+/** A train of identical pulses, like the pulse output: count pulses, one
+    starting every period s, each lasting width s with the given shape. Sine
+    cycles run back to back (their period is their width). */
 struct ShapedTrain
 {
     PulseShape shape = PulseShape::Square;
     double amp = 50;      // uA: the peak, or with equalCharge the height of the matching square pulse
     double width = 0.005; // s, one pulse (or one cycle)
     double count = 1;     // pulses (rounded to a whole number, at least 1)
-    double rate = 10;     // Hz, pulse starts per second (unused for one pulse)
+    double period = 0.1;  // s, from one pulse's start to the next (unused for one pulse and for sine cycles)
     double step = 0;      // uA added to the amplitude on each following pulse
     bool equalCharge = false; // scale the peak so each pulse carries the charge of a square pulse of amp
 };
