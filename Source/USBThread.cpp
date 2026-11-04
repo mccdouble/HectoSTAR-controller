@@ -87,6 +87,14 @@ void USBThread::run()
                 if (threadShouldExit())
                     break;
                 read = m_board->readDataBlocksRaw (1, m_buffers[m_curBuffer].getData());
+
+                // Not a full block in the FPGA FIFO yet. Back off briefly instead of
+                // re-polling immediately: the tight loop held the USB lock almost
+                // continuously, starving GUI-thread calls (Start Stim, stim parameter
+                // and pattern uploads) and causing hitches. The FPGA buffers samples,
+                // so this only adds ~1 ms latency when reads are already caught up.
+                if (read <= 0)
+                    sleep (1);
             } while (read <= 0);
             {
                 ScopedLock lock (m_lock);
