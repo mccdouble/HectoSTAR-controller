@@ -597,10 +597,10 @@ void ChannelList::resized()
     }
     // help, then the preview under the settings: pulse mode stays narrow
     // enough to sit beside the LFP viewer
-    const int pulseW = jlimit (300, kPulseColumnW, W - x0 - 20);
+    const int pulseW = jlimit (260, kPulseColumnW, W - x0 - 20);
     int y = kTopBarH + 42 + 5 * 32 + 4;
-    pulseHelp->setBounds (x0, y, pulseW, 48);
-    y += 54;
+    pulseHelp->setBounds (x0, y, pulseW, 62);
+    y += 68;
     pulsePreview->setBounds (x0, y, pulseW, 160);
     y += 164;
     pulseCycleButton->setBounds (x0, y, 90, 24);

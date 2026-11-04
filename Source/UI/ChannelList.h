@@ -98,7 +98,7 @@ public:
         pulse mode fits beside a half-width viewer. */
     static constexpr int kMinWidth = 1180;
     static constexpr int kMinHeight = 760;
-    static constexpr int kPulseColumnW = 420;
+    static constexpr int kPulseColumnW = 320;
     int getMinimumWidth() const;
 
 private:
