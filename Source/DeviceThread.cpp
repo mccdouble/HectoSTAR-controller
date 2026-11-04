@@ -1662,6 +1662,18 @@ bool DeviceThread::stopAcquisition()
     return true;
 }
 
+std::uint64_t DeviceThread::decodeStimLedWords (const std::uint16_t* adcWords)
+{
+    std::uint64_t bits = 0;
+    for (int g = 0; g < 4; ++g)
+    {
+        // each ADC carries one byte (0..255)
+        const std::uint64_t word = ((std::uint64_t) (adcWords[2 * g] & 0xFF) << 8) | (std::uint64_t) (adcWords[2 * g + 1] & 0xFF);
+        bits |= word << (16 * g);
+    }
+    return bits;
+}
+
 bool DeviceThread::updateBuffer()
 {
     unsigned char* bufferPtr;
@@ -1676,6 +1688,7 @@ bool DeviceThread::updateBuffer()
     int auxIndex, chanIndex;
     int numStreams = enabledStreams.size();
     int nSamps = Rhd2000DataBlockUsb3::getSamplesPerDataBlock();
+    std::uint64_t ledsOnInBlock = 0; // for the stim panel's live LED display
 
     //evalBoard->printFIFOmetrics();
     for (int samp = 0; samp < nSamps; samp++)
@@ -1776,6 +1789,10 @@ bool DeviceThread::updateBuffer()
         uint16 stimEventWord7 = *((uint16*) (bufferPtr + tempttl + 12));
         uint16 stimEventWord8 = *((uint16*) (bufferPtr + tempttl + 14));
 
+        const std::uint16_t stimWords[8] = { stimEventWord1, stimEventWord2, stimEventWord3, stimEventWord4,
+                                             stimEventWord5, stimEventWord6, stimEventWord7, stimEventWord8 };
+        ledsOnInBlock |= decodeStimLedWords (stimWords);
+
 
         uint16 inputTTLWord = *((uint16*) (bufferPtr + index));
 
@@ -1799,6 +1816,9 @@ bool DeviceThread::updateBuffer()
                                        &ttlEventWord,
                                        1);
     }
+
+    if (ledsOnInBlock != 0)
+        stimLedBits.fetch_or (ledsOnInBlock);
 
     if (updateSettingsDuringAcquisition)
     {

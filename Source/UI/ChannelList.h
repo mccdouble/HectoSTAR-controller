@@ -26,6 +26,7 @@
 
 #include <VisualizerEditorHeaders.h>
 
+#include <array>
 #include <set>
 
 namespace PatternEditor
@@ -57,7 +58,8 @@ class ChannelCanvas;
 class ChannelList : public Component,
                     public Button::Listener,
                     public ComboBox::Listener,
-                    private ChangeListener
+                    private ChangeListener,
+                    private Timer
 {
 public:
     /** Constructor */
@@ -150,6 +152,16 @@ private:
     //LEDs on the probe drawing, the same buttons in both modes. LED n is
     //drawing position n - 1 (shank (n - 1) / 16, row (n - 1) % 16 from the tip).
     std::set<int> pulseLeds; // pulse mode: the LEDs that pulse
+
+    // pulse mode: LEDs the board reports on (ADC stim words), lit on the
+    // drawing; each stays lit a few frames so short pulses are visible
+    std::array<int, 64> liveHold {};
+    bool ledIsLive (int led) const { return led >= 1 && led <= 64 && liveHold[(std::size_t) led - 1] > 0; }
+
+    /** Bit (0..63) of the decoded stim words that reports LED led (1..64,
+        tip to base per shank), or -1 when the probe has no known mapping. */
+    int stimBitForLed (int led) const;
+    void timerCallback() override;
     std::unique_ptr<Label> rangeLabel;
     std::unique_ptr<TextEditor> rangeEditor;
     std::unique_ptr<ColourButton> rangeSelectButton, allLedsButton, noLedsButton;

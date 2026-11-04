@@ -183,6 +183,21 @@ public:
             const bool isSel = sel.count (led) > 0;
             const bool blue = pattern ? owner.ledHasWaveform (led) : isSel;
 
+            if (! pattern && owner.ledIsLive (led))
+            {
+                // the board reports this LED on right now
+                g.setColour (playColour().withAlpha (0.45f));
+                g.fillEllipse (r.expanded (9.0f));
+                g.setColour (playColour());
+                g.fillEllipse (r);
+                g.setColour (Colours::black.withAlpha (0.8f));
+                g.drawEllipse (r, 1.2f);
+                g.setColour (Colours::black);
+                g.setFont (FontOptions (10.0f, Font::bold));
+                g.drawText (String (led), r.toNearestInt(), Justification::centred);
+                continue;
+            }
+
             if (pattern && isSel)
             {
                 g.setColour (accent);
@@ -261,6 +276,7 @@ private:
 
 ChannelList::~ChannelList()
 {
+    stopTimer();
     if (patternPanel != nullptr)
         patternPanel->getPlayback().removeChangeListener (this);
     if (patternDoc != nullptr)
@@ -430,6 +446,52 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
     updatePulsePreview();
     updateBoardStatus();
     update();
+
+    startTimerHz (30); // live LED display in pulse mode
+}
+
+int ChannelList::stimBitForLed (int led) const
+{
+    // 4-shank chronic, from the lab's analysis script: drawn shank s reads
+    // stim word shankOrder[s], and its LED j (1 = tip) is bit ledBitSeq[word][j]
+    // of that word (channels swapped in pairs)
+    static const int shankOrder[4] = { 2, 1, 3, 4 };
+    static const int ledBitSeq[4][16] = {
+        { 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15, 0 },
+        { 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15, 0 },
+        { 7, 8, 6, 9, 5, 10, 4, 11, 3, 12, 2, 13, 1, 14, 0, 15 },
+        { 7, 8, 6, 9, 5, 10, 4, 11, 3, 12, 2, 13, 1, 14, 0, 15 },
+    };
+
+    if (probeTypeSelect->getSelectedId() != 1 || led < 1 || led > 64)
+        return -1; // other probes: mapping not known yet
+
+    const int shank = (led - 1) / 16;
+    const int j = (led - 1) % 16;
+    const int word = shankOrder[shank] - 1;
+    return 16 * word + ledBitSeq[word][j];
+}
+
+void ChannelList::timerCallback()
+{
+    // always drain, so pulses from before switching to pulse mode don't show up later
+    const std::uint64_t bits = board->foundInputSource() ? board->takeStimLedBits() : 0;
+    if (selectedStimOutputType != 0)
+        return;
+
+    bool changed = false;
+    for (int i = 0; i < 64; ++i)
+    {
+        const int bit = stimBitForLed (i + 1);
+        const bool on = bit >= 0 && ((bits >> bit) & 1u) != 0;
+        int& hold = liveHold[(std::size_t) i];
+        const int before = hold;
+        hold = on ? 3 : jmax (0, hold - 1); // keep a lit LED on for ~100 ms
+        changed |= (before > 0) != (hold > 0);
+    }
+
+    if (changed)
+        ledOverlay->repaint();
 }
 
 void ChannelList::lookAndFeelChanged()
@@ -475,7 +537,7 @@ void ChannelList::setOutputMode (bool pattern)
     uploadStimParamButton->setTooltip (pattern ? "Write the pattern to the board (if it changed) and set the repeat count"
                                                : "Send the pulse settings and selected LEDs to the board");
     selectionHint->setText (pattern ? "Click LEDs to select them, then apply a waveform. Blue = has a waveform."
-                                    : "Click LEDs to select the ones that pulse (blue).",
+                                    : "Click LEDs to select the ones that pulse (blue). While recording, LEDs the board turns on glow (4-shank chronic).",
                             dontSendNotification);
 
     lookAndFeelChanged();

@@ -221,6 +221,17 @@ public:
     //Returns false if an upload is already running.
     bool startPatternUpload (File patternStimFile, std::function<void (bool)> onComplete);
     bool isPatternUploadRunning() const;
+
+    /** The four stim words (see decodeStimLedWords) OR-ed over every sample
+        since the last call, so a short pulse between two calls is still
+        reported. Cleared by the call. Safe from any thread. */
+    std::uint64_t takeStimLedBits() { return stimLedBits.exchange (0); }
+
+    /** The four 16-bit stim words of one sample, as the lab's MATLAB
+        reader builds them (shank_TTL): word w (0..3) = ADC 2w (high byte)
+        then ADC 2w+1 (low byte), placed at bits 16w..16w+15. Which LED each
+        bit is depends on the probe (see ChannelList::stimBitForLed). */
+    static std::uint64_t decodeStimLedWords (const std::uint16_t* adcWords);
     double getPatternUploadProgress() const; // 0.0 - 1.0
     void setPatternStimRepeatCount (int count);
     void setStimOutputType (int outputSelection);
@@ -298,6 +309,9 @@ private:
 
     class PatternUploadThread;
     std::unique_ptr<PatternUploadThread> patternUploader;
+
+    // LED channels seen on since the stim panel last looked (see takeStimLedBits)
+    std::atomic<std::uint64_t> stimLedBits { 0 };
 
     unsigned int blockSize;
 
