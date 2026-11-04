@@ -70,6 +70,12 @@ private:
 
     Label help;
 
+    // pulse shapes: the maths behind the train, and a way to adapt it
+    Label maths;
+    EditorButton asFormulaButton { "Edit as formula" };
+    void updateMaths();
+    void convertToFormula();
+
     WaveformPreview preview;
     EditorButton cycleButton { "One cycle" }, wholeButton { "Whole" };
     Label info;

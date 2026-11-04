@@ -252,6 +252,15 @@ WaveformDesigner::WaveformDesigner (PatternDocument& d) : doc (d)
     help.setMinimumHorizontalScale (1.0f);
     addAndMakeVisible (help);
 
+    maths.setFont (FontOptions (Font::getDefaultMonospacedFontName(), 12.0f, Font::plain));
+    maths.setJustificationType (Justification::topLeft);
+    maths.setMinimumHorizontalScale (1.0f);
+    maths.setColour (Label::backgroundColourId, Colours::black.withAlpha (0.08f));
+    addAndMakeVisible (maths);
+    asFormulaButton.setTooltip ("Turn this pulse train into a Custom formula that plays exactly the same samples, so it can be adapted");
+    asFormulaButton.onClick = [this] { convertToFormula(); };
+    addAndMakeVisible (asFormulaButton);
+
     addAndMakeVisible (preview);
     cycleButton.onClick = [this]
     {
@@ -454,6 +463,8 @@ void WaveformDesigner::refreshFields()
         case WaveKind::Formula: help.setText (kFormulaHelp, dontSendNotification); break;
         case WaveKind::Samples: help.setText ("Values are " + kMicroAmps + " at 20 kHz (one per 50 " + String::fromUTF8 ("\xc2\xb5") + "s).", dontSendNotification); break;
     }
+
+    updateMaths();
 }
 
 void WaveformDesigner::updateVisibility()
@@ -469,6 +480,8 @@ void WaveformDesigner::updateVisibility()
         paramEditors[(std::size_t) i].setVisible (used);
     }
     chargeToggle.setVisible (k == WaveKind::Shaped && working.wave.shaped.shape != PulseShape::Square);
+    maths.setVisible (k == WaveKind::Shaped);
+    asFormulaButton.setVisible (k == WaveKind::Shaped);
 
     pointsLabel.setVisible (k == WaveKind::Breakpoints);
     pointsEditor.setVisible (k == WaveKind::Breakpoints);
@@ -511,6 +524,67 @@ void WaveformDesigner::updateVisibility()
     applyButton.repaint();
 
     resized();
+}
+
+void WaveformDesigner::updateMaths()
+{
+    if (working.wave.kind != WaveKind::Shaped)
+    {
+        maths.setText ({}, dontSendNotification);
+        return;
+    }
+
+    const auto& t = working.wave.shaped;
+    const String uA = " " + kMicroAmps;
+    auto num = [] (double v, int decimals = 3)
+    {
+        String s (v, decimals);
+        if (s.containsChar ('.'))
+            s = s.trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
+        return s;
+    };
+
+    const bool cycles = t.shape == PulseShape::SineCycle;
+    const int n = shapedCount (t);
+    const double periodMs = 1000.0 * shapedPeriodSamples (t) / kSampleRateHz;
+    const double widthMs = 1000.0 * shapedPulseSamples (t) / kSampleRateHz;
+    const String paper = String (pulseShapePaperName (t.shape));
+
+    String text;
+    text << "Shape   f(x) = " << String (pulseShapeMaths (t.shape)) << "\n"
+         << "        x goes 0 -> 1 across each " << num (widthMs) << " ms " << (cycles ? "cycle" : "pulse");
+    if (paper.isNotEmpty())
+        text << "   (paper: \"" << paper << "\")";
+
+    String amp = num (t.amp);
+    if (t.step != 0)
+        amp = "(" + num (t.amp) + (t.step > 0 ? " + " : " - ") + num (std::abs (t.step)) + " k)";
+
+    text << "\nTrain   " << (cycles ? "cycle" : "pulse") << " k = 0.." << (n - 1) << " starts at k x " << num (periodMs) << " ms;  current = "
+         << amp << uA << " x " << (t.equalCharge ? "g x " : "") << "f(x)";
+
+    if (t.equalCharge)
+    {
+        const double mean = pulseShapeMean (t.shape, shapedPulseSamples (t));
+        text << "\nCharge  g = 1 / mean of f = 1 / " << num (mean, 4) << " = " << num (1.0 / mean, 3)
+             << "  (peak " << num (shapedMaxPeak (t), 1) << uA << ", same charge as a square pulse)";
+    }
+
+    maths.setText (text, dontSendNotification);
+}
+
+void WaveformDesigner::convertToFormula()
+{
+    if (working.wave.kind != WaveKind::Shaped)
+        return;
+
+    const ShapedTrain t = working.wave.shaped;
+    working.length = naturalLength (working.wave);
+    working.wave.formula = shapedTrainFormula (t);
+    working.wave.kind = WaveKind::Formula;
+    working.label = shapeName (t.shape).toStdString() + " (formula)";
+    setTab (2);
+    workingChanged();
 }
 
 void WaveformDesigner::commitParam (int index)
@@ -757,6 +831,16 @@ void WaveformDesigner::resized()
 
     help.setBounds (0, y - 2, x1, 34);
     y += 36;
+
+    if (maths.isVisible())
+    {
+        const int lines = jmax (1, StringArray::fromLines (maths.getText()).size());
+        const int h = lines * 15 + 8;
+        maths.setBounds (0, y, x1, h);
+        y += h + 4;
+        asFormulaButton.setBounds (0, y, 130, 24);
+        y += 30;
+    }
 
     flow ({ { &startLabel, &startEditor, 64 },
             { nullptr, &timingBox, 220 },

@@ -611,6 +611,53 @@ static void testShapedTrains()
         CHECK (back.blocks.size() == 3 && activeLeds (back) == activeLeds (src), "decoded LEDs");
         CHECK (encode (back) == bytes, "decoded pattern re-encodes to the same bytes (%s)", probeMappingName (probe));
     }
+    // every shaped train has an equivalent formula
+    {
+        int exact = 0, total = 0, worst = 0;
+        for (int s = 0; s < kNumPulseShapes; ++s)
+        {
+            for (int variant = 0; variant < 3; ++variant)
+            {
+                ShapedTrain tr;
+                tr.shape = (PulseShape) s;
+                tr.amp = variant == 0 ? 50 : 23.5;
+                tr.width = variant == 2 ? 0.00735 : 0.01;
+                tr.count = variant == 0 ? 1 : 4;
+                tr.period = 0.0225;
+                tr.step = variant == 1 ? 7.25 : 0;
+                tr.equalCharge = variant == 2;
+                if (tr.equalCharge && shapedMaxPeak (tr) > 100)
+                    tr.amp = 100 / (shapedMaxPeak (tr) / tr.amp);
+
+                Pattern a, f;
+                a.duration = f.duration = 0.2;
+                a.blocks.push_back (shapedBlock (1, 5, 0.0123456, tr));
+                Block fb = a.blocks[0];
+                fb.wave = WaveSpec();
+                fb.wave.kind = WaveKind::Formula;
+                fb.wave.formula = shapedTrainFormula (tr);
+                f.blocks.push_back (fb);
+
+                std::string err;
+                const bool ok = validate (f).empty();
+                CHECK (ok, "%s formula invalid: %s", pulseShapeId (tr.shape), fb.wave.formula.c_str());
+                if (! ok)
+                    continue;
+
+                const auto la = renderLane (a, 5), lf = renderLane (f, 5);
+                for (std::size_t i = 0; i < la.size(); ++i)
+                {
+                    ++total;
+                    const int d = std::abs ((int) la[i] - (int) lf[i]);
+                    exact += d == 0;
+                    worst = std::max (worst, d);
+                }
+            }
+        }
+        CHECK (worst <= 1, "formula vs shaped train differ by up to %d uA", worst);
+        std::printf ("  shaped train as formula: %d of %d samples identical, worst difference %d uA\n", exact, total, worst);
+    }
+
     Pattern bad;
     std::string err;
     CHECK (! decodePatternFile (std::vector<std::uint8_t> (100, 1), ProbeMapping::FourShankChronic, bad, err), "100 bytes is not a pattern file");

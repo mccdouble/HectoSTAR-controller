@@ -313,6 +313,117 @@ double shapedMaxPeak (const ShapedTrain& t)
     return t.equalCharge ? highest / pulseShapeMean (t.shape, shapedPulseSamples (t)) : highest;
 }
 
+std::string pulseShapeMaths (PulseShape shape)
+{
+    switch (shape)
+    {
+        case PulseShape::Square: return "1";
+        case PulseShape::RampUp: return "x";
+        case PulseShape::RampDown: return "1 - x";
+        case PulseShape::Triangle: return "2x for x < 0.5, else 2(1 - x)";
+        case PulseShape::RampUpHold: return "2x for x < 0.5, else 1";
+        case PulseShape::HoldRampDown: return "1 for x < 0.5, else 2(1 - x)";
+        case PulseShape::Gaussian: return "exp(-(x - 0.5)^2 / (2 s^2)),  s = 1/7 of the width";
+        case PulseShape::RisingGaussian: return "exp(-(x - 1)^2 / (2 s^2)),  s = 1/3.5 of the width (peak at the end)";
+        case PulseShape::FallingGaussian: return "exp(-x^2 / (2 s^2)),  s = 1/3.5 of the width (peak at the start)";
+        case PulseShape::HalfSine: return "sin(pi x)";
+        case PulseShape::RisingSine: return "sin(pi x / 2)";
+        case PulseShape::FallingSine: return "cos(pi x / 2)";
+        case PulseShape::SineCycle: return "(1 - cos(2 pi x)) / 2";
+    }
+    return "1";
+}
+
+std::string pulseShapePaperName (PulseShape shape)
+{
+    switch (shape)
+    {
+        case PulseShape::Square: return "square";
+        case PulseShape::RampUp: return "left-triangular";
+        case PulseShape::RampDown: return "right-triangular";
+        case PulseShape::Triangle: return "triangular";
+        case PulseShape::RampUpHold: return "backward-ramp";
+        case PulseShape::HoldRampDown: return "forward-ramp";
+        case PulseShape::Gaussian: return "Gaussian";
+        case PulseShape::RisingGaussian: return "left-Gaussian";
+        case PulseShape::FallingGaussian: return "right-Gaussian";
+        case PulseShape::HalfSine: return "positive-sinusoidal";
+        case PulseShape::RisingSine: return "left-positive-sinusoidal";
+        case PulseShape::FallingSine: return "right-positive-sinusoidal";
+        case PulseShape::SineCycle: return "";
+    }
+    return "";
+}
+
+std::string shapedTrainFormula (const ShapedTrain& t)
+{
+    auto num = [] (double v)
+    {
+        std::ostringstream os;
+        os.imbue (std::locale::classic());
+        os << std::setprecision (17) << v;
+        return os.str();
+    };
+
+    const int width = shapedPulseSamples (t);
+    const int period = shapedPeriodSamples (t);
+    const int pulseLen = std::min (width, period);
+    const int count = shapedCount (t);
+    const double scale = t.equalCharge ? 1.0 / pulseShapeMean (t.shape, width) : 1.0;
+
+    // sample index from the block start (the epsilon guards t*fs landing just below a whole number)
+    const std::string k = "floor(t*fs + 0.000001)";
+    const std::string j = "mod(" + k + ", " + std::to_string (period) + ")";
+    const std::string N = std::to_string (width);
+
+    // x across the pulse, sampled as the renderer does (pulseX)
+    std::string x;
+    switch (t.shape)
+    {
+        case PulseShape::RampUp:
+        case PulseShape::RisingGaussian:
+        case PulseShape::RisingSine:
+            x = width <= 1 ? "0.5" : "((" + j + " + 1)/" + N + ")";
+            break;
+        case PulseShape::RampDown:
+        case PulseShape::FallingGaussian:
+        case PulseShape::FallingSine:
+            x = width <= 1 ? "0.5" : "(" + j + "/" + N + ")";
+            break;
+        default:
+            x = width <= 1 ? "0.5" : "((" + j + " + 0.5)/" + N + ")";
+            break;
+    }
+
+    std::string f;
+    switch (t.shape)
+    {
+        case PulseShape::Square: f = "1"; break;
+        case PulseShape::RampUp: f = x; break;
+        case PulseShape::RampDown: f = "(1 - " + x + ")"; break;
+        case PulseShape::Triangle: f = "if(" + x + " < 0.5, 2*" + x + ", 2*(1 - " + x + "))"; break;
+        case PulseShape::RampUpHold: f = "if(" + x + " < 0.5, 2*" + x + ", 1)"; break;
+        case PulseShape::HoldRampDown: f = "if(" + x + " < 0.5, 1, 2*(1 - " + x + "))"; break;
+        case PulseShape::Gaussian: f = "exp(-((" + x + " - 0.5)*(" + x + " - 0.5))/(2*(1/7)*(1/7)))"; break;
+        case PulseShape::RisingGaussian: f = "exp(-((" + x + " - 1)*(" + x + " - 1))/(2*(1/3.5)*(1/3.5)))"; break;
+        case PulseShape::FallingGaussian: f = "exp(-(" + x + "*" + x + ")/(2*(1/3.5)*(1/3.5)))"; break;
+        case PulseShape::HalfSine: f = "sin(pi*" + x + ")"; break;
+        case PulseShape::RisingSine: f = "sin(0.5*pi*" + x + ")"; break;
+        case PulseShape::FallingSine: f = "cos(0.5*pi*" + x + ")"; break;
+        case PulseShape::SineCycle: f = "0.5*(1 - cos(2*pi*" + x + "))"; break;
+    }
+
+    std::string amp = num (t.amp);
+    if (t.step != 0)
+        amp = "max(0, " + num (t.amp) + " + floor(" + k + "/" + std::to_string (period) + ")*" + num (t.step) + ")";
+    else if (t.amp < 0)
+        amp = "0";
+
+    std::string value = amp + "*(" + f + (scale != 1.0 ? "*" + num (scale) : "") + ")";
+
+    return "if(" + k + " < " + std::to_string ((long long) count * period) + " && " + j + " < " + std::to_string (pulseLen) + ", " + value + ", 0)";
+}
+
 namespace
 {
 

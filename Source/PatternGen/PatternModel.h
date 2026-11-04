@@ -103,6 +103,20 @@ int shapedCount (const ShapedTrain& train);
 /** Highest peak current (uA) the train asks for, after equal-charge scaling. */
 double shapedMaxPeak (const ShapedTrain& train);
 
+/** The shape as maths in x (0..1 across the pulse width), for display,
+    e.g. "exp(-(x - 0.5)^2 / (2 s^2)), s = 1/7". */
+std::string pulseShapeMaths (PulseShape shape);
+
+/** Name of the shape in Bansal, Pyari and Roy 2023 (Photonics 10:571,
+    Table 6), or "" for shapes that are not from the paper. */
+std::string pulseShapePaperName (PulseShape shape);
+
+/** A Formula (Formula.h) that renders the same samples as the train: it
+    works in whole 50 us samples from the block start, k = floor(t*fs), so
+    pulse timing matches exactly. Put it in a block of the same start and
+    with length naturalLength() of the train. */
+std::string shapedTrainFormula (const ShapedTrain& train);
+
 struct Breakpoint
 {
     double time = 0;  // s from block start
