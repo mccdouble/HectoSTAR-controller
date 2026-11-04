@@ -133,9 +133,24 @@ WaveformDesigner::WaveformDesigner (PatternDocument& d) : doc (d)
     title.setFont (FontOptions (14.0f, Font::bold));
     addAndMakeVisible (title);
 
-    tabShapes.onClick = [this] { setTab (0); };
-    tabClassic.onClick = [this] { setTab (1); };
-    tabCustom.onClick = [this] { setTab (2); };
+    auto openTab = [this] (int t)
+    {
+        // show that tab's settings: keep the waveform if it belongs there, else take the tab's first
+        if (tabFor (working.wave) != t)
+        {
+            const auto choices = choicesForTab (t);
+            if (! choices.empty())
+            {
+                working.wave = waveChoices()[(std::size_t) choices.front()].wave;
+                working.label.clear();
+            }
+        }
+        setTab (t);
+        workingChanged();
+    };
+    tabShapes.onClick = [openTab] { openTab (0); };
+    tabClassic.onClick = [openTab] { openTab (1); };
+    tabCustom.onClick = [openTab] { openTab (2); };
     tabShapes.setTooltip ("Pulse trains of one shape: set peak, width, number of pulses and rate");
     tabClassic.setTooltip ("The waveform types of the MATLAB pattern generator");
     tabCustom.setTooltip ("Your own shape: points, a formula, or samples from a CSV file");
@@ -485,8 +500,8 @@ void WaveformDesigner::updateVisibility()
             }
 
     const String leds = n == 1 ? "LED " + String (*doc.selectedLeds().begin()) : String (n) + " LEDs";
-    title.setText (n == 0 ? String ("Waveform") : "Waveform for " + leds, dontSendNotification);
-    applyButton.setLabel (n == 0 ? String ("Select LEDs to apply") : "Apply to " + leds);
+    title.setText (n == 0 ? String ("Waveform (select LEDs to apply it)") : "Waveform for " + leds, dontSendNotification);
+    applyButton.setLabel ("Apply to " + (n == 0 ? String ("LEDs") : leds));
     applyButton.setActive (n > 0);
     appendButton.setActive (withBlocks > 0);
     removeButton.setActive (withBlocks > 0);
@@ -658,7 +673,14 @@ void WaveformDesigner::resized()
     const int gap = 6;
 
     auto top = juce::Rectangle<int> (0, 0, W, rowH);
-    presetsButton.setBounds (top.removeFromRight (90));
+    presetsButton.setBounds (top.removeFromRight (80));
+    top.removeFromRight (16);
+    removeButton.setBounds (top.removeFromRight (80));
+    top.removeFromRight (4);
+    appendButton.setBounds (top.removeFromRight (90));
+    top.removeFromRight (4);
+    applyButton.setBounds (top.removeFromRight (jmin (170, jmax (110, top.getWidth() - 120))));
+    top.removeFromRight (8);
     title.setBounds (top);
 
     auto tabs = juce::Rectangle<int> (0, rowH + 6, W, rowH);
@@ -737,13 +759,6 @@ void WaveformDesigner::resized()
             { nullptr, &timingBox, 220 },
             { &everyLabel, &stepEditor, 54 },
             { nullptr, &msLabel, 24 } });
-
-    auto buttons = juce::Rectangle<int> (0, y + 2, x1, 28);
-    applyButton.setBounds (buttons.removeFromLeft (jmin (180, buttons.getWidth())));
-    buttons.removeFromLeft (6);
-    appendButton.setBounds (buttons.removeFromLeft (jmin (96, buttons.getWidth())));
-    buttons.removeFromLeft (6);
-    removeButton.setBounds (buttons.removeFromLeft (jmin (86, buttons.getWidth())));
 }
 
 } // namespace PatternEditor

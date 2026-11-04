@@ -304,7 +304,7 @@ void ShapePalette::paint (Graphics& g)
         g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, isSel ? 2.0f : 1.0f);
 
         auto inner = r.reduced (6.0f, 4.0f);
-        auto thumbArea = inner.removeFromTop (28.0f);
+        auto thumbArea = inner.removeFromTop (22.0f);
         const auto& th = thumbs[(std::size_t) i];
         if (th.empty())
         {

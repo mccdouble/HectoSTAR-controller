@@ -76,8 +76,8 @@ public:
     void mouseExit (const MouseEvent& e) override;
     String getTooltip() override;
 
-    static constexpr int kTileW = 92;
-    static constexpr int kTileH = 62;
+    static constexpr int kTileW = 84;
+    static constexpr int kTileH = 54;
     static constexpr int kGap = 6;
 
 private:

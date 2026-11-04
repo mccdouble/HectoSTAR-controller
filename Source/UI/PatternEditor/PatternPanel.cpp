@@ -182,7 +182,44 @@ void LedList::resized()
 
 //==============================================================================
 
-PatternPanel::PatternPanel (PatternDocument& d) : doc (d), ledList (d), designer (d), timeline (d)
+/** The pattern's timeline (one lane per LED in use) in a window of its own,
+    so the stim panel stays uncluttered. Closing it only hides it. */
+class PatternPanel::TimelineWindow : public DocumentWindow
+{
+public:
+    TimelineWindow (PatternPanel& owner, PatternDocument& doc)
+        : DocumentWindow ("HectoSTAR pattern timeline", owner.findColour (ThemeColours::componentBackground), DocumentWindow::allButtons)
+    {
+        setLookAndFeel (&owner.getLookAndFeel());
+
+        auto* view = new TimelineView (doc);
+        view->onLaneNameClicked = [&doc] (int led)
+        {
+            doc.setSelectedBlocks ({});
+            doc.setSelectedLeds ({ led });
+        };
+        timeline = view;
+        setContentOwned (view, false);
+        setUsingNativeTitleBar (true);
+        setResizable (true, false);
+        setResizeLimits (500, 200, 10000, 10000);
+
+        auto area = owner.getScreenBounds();
+        setBounds (area.getX(), area.getBottom() - 360, jmax (900, area.getWidth()), 360);
+    }
+
+    ~TimelineWindow() override
+    {
+        clearContentComponent();
+        setLookAndFeel (nullptr);
+    }
+
+    void closeButtonPressed() override { setVisible (false); }
+
+    TimelineView* timeline = nullptr;
+};
+
+PatternPanel::PatternPanel (PatternDocument& d) : doc (d), ledList (d), designer (d)
 {
     setWantsKeyboardFocus (true);
 
@@ -192,7 +229,9 @@ PatternPanel::PatternPanel (PatternDocument& d) : doc (d), ledList (d), designer
     redoButton.setTooltip ("Redo (Ctrl+Y)");
     undoButton.onClick = [this] { doc.undo(); };
     redoButton.onClick = [this] { doc.redo(); };
-    for (auto* b : { &fileButton, &undoButton, &redoButton })
+    timelineButton.setTooltip ("Open the pattern's timeline: every LED in use over time (drag blocks to fine-tune timing)");
+    timelineButton.onClick = [this] { showTimeline(); };
+    for (auto* b : { &fileButton, &undoButton, &redoButton, &timelineButton })
         addAndMakeVisible (b);
 
     for (auto* l : { &lengthLabel, &repeatLabel, &usageLabel, &boardLabel })
@@ -218,13 +257,6 @@ PatternPanel::PatternPanel (PatternDocument& d) : doc (d), ledList (d), designer
     addAndMakeVisible (ledList);
     addAndMakeVisible (designer);
 
-    timeline.onLaneNameClicked = [this] (int led)
-    {
-        doc.setSelectedBlocks ({});
-        doc.setSelectedLeds ({ led });
-    };
-    addAndMakeVisible (timeline);
-
     doc.addChangeListener (this);
     refresh();
 }
@@ -232,6 +264,17 @@ PatternPanel::PatternPanel (PatternDocument& d) : doc (d), ledList (d), designer
 PatternPanel::~PatternPanel()
 {
     doc.removeChangeListener (this);
+    timelineWindow.reset();
+}
+
+void PatternPanel::showTimeline()
+{
+    if (timelineWindow == nullptr)
+        timelineWindow = std::make_unique<TimelineWindow> (*this, doc);
+    timelineWindow->setVisible (true);
+    timelineWindow->toFront (true);
+    if (timelineWindow->timeline != nullptr)
+        timelineWindow->timeline->zoomToFit();
 }
 
 void PatternPanel::changeListenerCallback (ChangeBroadcaster*)
@@ -310,7 +353,6 @@ void PatternPanel::paint (Graphics& g)
     g.setColour (findColour (ThemeColours::outline));
     g.drawHorizontalLine (headerBottom, 0.0f, (float) getWidth());
     g.drawVerticalLine (ledList.getRight() + 7, (float) ledList.getY(), (float) ledList.getBottom());
-    g.drawHorizontalLine (timeline.getY() - 6, 0.0f, (float) getWidth());
 }
 
 void PatternPanel::resized()
@@ -323,6 +365,8 @@ void PatternPanel::resized()
     undoButton.setBounds (header.removeFromLeft (56));
     header.removeFromLeft (4);
     redoButton.setBounds (header.removeFromLeft (56));
+    header.removeFromLeft (4);
+    timelineButton.setBounds (header.removeFromLeft (80));
     header.removeFromLeft (10);
     lengthLabel.setBounds (header.removeFromLeft (textWidth (lengthLabel.getText()) + 10));
     lengthEditor.setBounds (header.removeFromLeft (56));
@@ -336,13 +380,7 @@ void PatternPanel::resized()
     headerBottom = b.getY() + 4;
     b.removeFromTop (12);
 
-    // timeline: just tall enough for the LEDs in use (it scrolls beyond that)
-    const int lanes = jmax (1, (int) doc.laneLeds().size());
-    const int timelineH = jlimit (110, jmax (110, b.getHeight() / 3), TimelineView::kRulerHeight + lanes * TimelineView::kLaneHeight + 16);
-    timeline.setBounds (b.removeFromBottom (timelineH));
-    b.removeFromBottom (12);
-
-    ledList.setBounds (b.removeFromLeft (jlimit (220, 320, b.getWidth() / 3)));
+    ledList.setBounds (b.removeFromLeft (jlimit (200, 280, b.getWidth() / 4)));
     b.removeFromLeft (14);
     designer.setBounds (b);
 }
@@ -453,7 +491,6 @@ void PatternPanel::openPattern()
                                                       return;
                                                   }
                                                   doc.reset (p, f);
-                                                  timeline.zoomToFit();
                                                   if (onPatternReplaced)
                                                       onPatternReplaced();
                                               });
@@ -595,7 +632,6 @@ void PatternPanel::loadBin()
                                                       b.label = f.getFileNameWithoutExtension().toStdString();
                                                   p.repeatCount = doc.pattern().repeatCount;
                                                   doc.reset (p, File());
-                                                  timeline.zoomToFit();
                                                   if (onPatternReplaced)
                                                       onPatternReplaced();
 

@@ -75,13 +75,18 @@ private:
     PatternDocument& doc;
 
     EditorButton fileButton { "File" }, undoButton { "Undo" }, redoButton { "Redo" };
+    EditorButton timelineButton { "Timeline" };
     Label lengthLabel { {}, "Pattern length (s)" }, repeatLabel { {}, "Repeats" };
     TextEditor lengthEditor, repeatEditor;
     Label usageLabel, boardLabel;
 
     LedList ledList;
     WaveformDesigner designer;
-    TimelineView timeline;
+
+    // the whole pattern over time, in its own window
+    class TimelineWindow;
+    std::unique_ptr<TimelineWindow> timelineWindow;
+    void showTimeline();
 
     std::unique_ptr<FileChooser> chooser;
     std::set<int> lastBlockSelection;
