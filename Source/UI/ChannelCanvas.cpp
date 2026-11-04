@@ -123,7 +123,8 @@ void ChannelCanvas::resized()
     // - left labels margin
     // - full shank length to the right
     // - some extra margin
-    const int contentW = (int) std::ceil (startX + shankLength + 250.0f);
+    // ...and never narrower than the controls along the top
+    const int contentW = jmax ((int) std::ceil (startX + shankLength + 250.0f), channelList->getRequiredWidth());
 
     // Height big enough for stacked shanks + some UI above + disclaimer below
     const float probeBottom = startY + (shanks - 1) * (shankH + gap) + shankH;

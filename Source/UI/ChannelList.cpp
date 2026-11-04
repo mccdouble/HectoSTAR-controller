@@ -148,7 +148,7 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
 
     //opens the pattern editor window (build, save, export and upload patterns)
     patternEditorButton = std::make_unique<ColourButton> ("Pattern Editor...", FontOptions (14.0f));
-    patternEditorButton->setBounds (730, 10, 130, 25);
+    patternEditorButton->setBounds (730, 10, 150, 25);
     patternEditorButton->addListener (this);
     addAndMakeVisible (patternEditorButton.get());
 
@@ -394,6 +394,15 @@ void ChannelList::buttonClicked (Button* btn)
     }
     */
     
+}
+
+int ChannelList::getRequiredWidth() const
+{
+    int right = 0;
+    for (auto* child : getChildren())
+        if (child->isVisible())
+            right = jmax (right, child->getRight());
+    return right + 20;
 }
 
 void ChannelList::beginPatternUpload (const File& file, std::function<void (bool)> afterUpload)

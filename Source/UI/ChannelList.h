@@ -77,6 +77,9 @@ public:
 
     void paint (juce::Graphics& g) override;
 
+    /** Width needed to show every control (rightmost child edge plus a margin). */
+    int getRequiredWidth() const;
+
 
 private:
     Array<float> gains;
