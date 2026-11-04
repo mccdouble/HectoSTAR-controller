@@ -156,7 +156,7 @@ void DeviceThread::handleBroadcastMessage (const String& msg, const int64 messag
 
     //std::cout << "Received " << msg << std::endl;
 
-    if (parts[0].equalsIgnoreCase ("RHDCONTROL"))
+    if (parts[0].equalsIgnoreCase ("HECTOSTAR"))
     {
         if (parts.size() > 1)
         {
