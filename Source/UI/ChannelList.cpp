@@ -764,6 +764,8 @@ void ChannelList::buttonClicked (Button* btn)
 
         //trig source is 0 indexed on fpga
         board->uploadStimParameters (amplitude, period, pulse_width, edge_sel, pulse_count, (trig_source - 1), leds);
+
+        AlertWindow::showMessageBoxAsync (AlertWindow::NoIcon, "Pulse settings", "Uploaded", "OK", this);
     }
 }
 
