@@ -104,7 +104,7 @@ void ChannelCanvas::resized()
     channelViewport->setBounds (0, 0, getWidth(), getHeight());
 
     // fill the visible area, scrolling only when it is smaller than the stim panel needs
-    const int contentW = jmax (ChannelList::kMinWidth, getWidth() - scrollBarThickness);
+    const int contentW = jmax (channelList->getMinimumWidth(), getWidth() - scrollBarThickness);
     const int contentH = jmax (ChannelList::kMinHeight, getHeight() - scrollBarThickness);
     channelList->setBounds (0, 0, contentW, contentH);
 

@@ -94,9 +94,12 @@ public:
     void paint (juce::Graphics& g) override;
     void resized() override;
 
-    /** Smallest size that shows everything. */
+    /** Smallest size that shows everything: pattern mode needs the width,
+        pulse mode fits beside a half-width viewer. */
     static constexpr int kMinWidth = 1180;
     static constexpr int kMinHeight = 760;
+    static constexpr int kPulseColumnW = 420;
+    int getMinimumWidth() const;
 
 private:
     Array<float> gains;

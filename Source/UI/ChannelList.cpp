@@ -482,6 +482,10 @@ void ChannelList::setOutputMode (bool pattern)
     updateRangeText (true);
     resized();
     repaint();
+
+    // the modes need different widths: let the viewport re-fit the content
+    if (ownerCanvas != nullptr)
+        ownerCanvas->resized();
 }
 
 int ChannelList::visibleLeds() const
@@ -591,12 +595,21 @@ void ChannelList::resized()
         pulseLabels[i]->setBounds (x0, y, 130, 26);
         fields[i]->setBounds (x0 + 136, y, 90, 26);
     }
-    const int previewX = x0 + 250;
-    const int previewW = jlimit (260, 520, W - previewX - 20);
-    pulsePreview->setBounds (previewX, kTopBarH + 42, previewW, 154);
-    pulseCycleButton->setBounds (previewX, kTopBarH + 42 + 158, 90, 24);
-    pulseWholeButton->setBounds (previewX + 94, kTopBarH + 42 + 158, 70, 24);
-    pulseHelp->setBounds (x0, kTopBarH + 42 + 5 * 32 + 6, jmax (200, previewX - x0 - 10), 60);
+    // help, then the preview under the settings: pulse mode stays narrow
+    // enough to sit beside the LFP viewer
+    const int pulseW = jlimit (300, kPulseColumnW, W - x0 - 20);
+    int y = kTopBarH + 42 + 5 * 32 + 4;
+    pulseHelp->setBounds (x0, y, pulseW, 48);
+    y += 54;
+    pulsePreview->setBounds (x0, y, pulseW, 160);
+    y += 164;
+    pulseCycleButton->setBounds (x0, y, 90, 24);
+    pulseWholeButton->setBounds (x0 + 94, y, 70, 24);
+}
+
+int ChannelList::getMinimumWidth() const
+{
+    return selectedStimOutputType != 0 ? kMinWidth : kProbeColumnW + 10 + kPulseColumnW + 20;
 }
 
 void ChannelList::updatePulsePreview()
