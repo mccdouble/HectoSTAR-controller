@@ -768,6 +768,16 @@ bool decodePatternFile (const std::vector<std::uint8_t>& bytes, ProbeMapping map
     return true;
 }
 
+double contentEnd (const Pattern& pattern)
+{
+    double end = 0;
+    for (const Block& b : pattern.blocks)
+        if (std::isfinite (b.start) && std::isfinite (b.length) && b.length > 0)
+            end = std::max (end, b.start + b.length);
+    // whole samples; the small slack keeps an exact end from rounding up one more
+    return std::ceil (end * kSampleRateHz - 1.0e-6) / kSampleRateHz;
+}
+
 std::string toJson (const Pattern& pattern)
 {
     json::Value root = json::Value::makeObject();
@@ -776,6 +786,7 @@ std::string toJson (const Pattern& pattern)
     root.set ("duration", number (pattern.duration));
     root.set ("probe", json::Value::makeString (probeMappingName (pattern.probe)));
     root.set ("repeatCount", number (pattern.repeatCount));
+    root.set ("autoLength", json::Value::makeBool (pattern.autoLength));
 
     json::Value blocks = json::Value::makeArray();
 
@@ -884,6 +895,7 @@ bool fromJson (const std::string& text, Pattern& pattern, std::string& error)
     Pattern p;
     p.duration = root.getNumber ("duration", 1.0);
     p.repeatCount = (int) root.getNumber ("repeatCount", 1);
+    p.autoLength = root.getBool ("autoLength", false);
 
     if (! parseProbe (root.getString ("probe", probeMappingName (ProbeMapping::FourShankChronic)), p.probe))
     {

@@ -171,7 +171,15 @@ struct Pattern
     ProbeMapping probe = ProbeMapping::FourShankChronic;
     int repeatCount = 1; // times the FPGA plays the pattern
     std::vector<Block> blocks;
+
+    // the editor keeps duration = contentEnd (blocks) while this is on;
+    // off once a length is typed in (files saved before it load as off)
+    bool autoLength = true;
 };
+
+/** End of the last block (s), rounded up to a whole 20 kHz sample; 0 when
+    no block has a finite end. */
+double contentEnd (const Pattern& pattern);
 
 /** How long a waveform naturally lasts (s): to the end of the last pulse
     for shaped trains, count x period for the fixed built-in types, D for wavelet, the last point for non-repeating

@@ -33,10 +33,20 @@ void PatternDocument::pushUndo()
     redoStack.clear();
 }
 
+void PatternDocument::fitAutoLength()
+{
+    if (! current.autoLength)
+        return;
+    const double end = contentEnd (current);
+    if (end > 0)
+        current.duration = end;
+}
+
 void PatternDocument::modify (const std::function<void (Pattern&)>& change)
 {
     pushUndo();
     change (current);
+    fitAutoLength();
     changed();
 }
 
@@ -48,6 +58,7 @@ void PatternDocument::beginGesture()
 void PatternDocument::modifyLive (const std::function<void (Pattern&)>& change)
 {
     change (current);
+    fitAutoLength();
     changed();
 }
 
@@ -74,6 +85,7 @@ void PatternDocument::redo()
 void PatternDocument::reset (const Pattern& p, const File& f)
 {
     current = p;
+    fitAutoLength();
     ++version;
     file = f;
     undoStack.clear();

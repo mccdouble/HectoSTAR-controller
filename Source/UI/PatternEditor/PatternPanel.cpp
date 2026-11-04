@@ -93,6 +93,10 @@ TimelinePane::TimelinePane (PatternDocument& d, Playback& p) : doc (d), playback
         doc.setSelectedLeds (std::set<int> (used.begin(), used.end()));
     };
     addAndMakeVisible (inUseButton);
+
+    fitHeightButton.setTooltip ("Make the lanes fill the timeline's height (Alt+wheel zooms the lane height by hand)");
+    fitHeightButton.onClick = [this] { timeline.fitLanesToHeight(); };
+    addAndMakeVisible (fitHeightButton);
     addAndMakeVisible (timeline);
 
     playback.addChangeListener (this);
@@ -146,6 +150,8 @@ void TimelinePane::resized()
     dockButton.setBounds (bar.removeFromRight (80));
     bar.removeFromRight (6);
     inUseButton.setBounds (bar.removeFromRight (150));
+    bar.removeFromRight (6);
+    fitHeightButton.setBounds (bar.removeFromRight (84));
     title.setBounds (bar.removeFromLeft (80));
     playButton.setBounds (bar.removeFromLeft (64));
     bar.removeFromLeft (4);
@@ -271,8 +277,16 @@ PatternPanel::PatternPanel (PatternDocument& d) : doc (d), playback (d), designe
 
     lengthEditor.setInputRestrictions (10, "0123456789.");
     lengthEditor.setJustification (Justification::centredRight);
-    lengthEditor.setTooltip ("Length of one run of the pattern. The board holds up to 13.1 s.");
+    lengthEditor.setTooltip ("Length of one run of the pattern. The board holds up to 13.1 s. Typing a length turns Auto off.");
     lengthEditor.onReturnKey = lengthEditor.onFocusLost = [this] { commitLength(); };
+    autoLengthButton.setTooltip ("Auto: the pattern ends where the last waveform ends (to the sample). "
+                                 "Off: the length you type, e.g. to leave a gap before the next repeat.");
+    autoLengthButton.onClick = [this]
+    {
+        const bool on = ! doc.pattern().autoLength;
+        doc.modify ([on] (Pattern& p) { p.autoLength = on; });
+    };
+    addAndMakeVisible (autoLengthButton);
     repeatEditor.setInputRestrictions (6, "0123456789");
     repeatEditor.setJustification (Justification::centredRight);
     repeatEditor.setTooltip ("How many times the board plays the pattern each time stim starts");
@@ -348,7 +362,9 @@ void PatternPanel::refresh()
     const Pattern& p = doc.pattern();
 
     if (! lengthEditor.hasKeyboardFocus (true))
-        lengthEditor.setText (String (p.duration, 3).trimCharactersAtEnd ("0").trimCharactersAtEnd ("."), false);
+        lengthEditor.setText (String (p.duration, 5).trimCharactersAtEnd ("0").trimCharactersAtEnd ("."), false);
+    autoLengthButton.setStyle (p.autoLength ? EditorButton::Style::Accent : EditorButton::Style::Normal);
+    autoLengthButton.repaint();
     if (! repeatEditor.hasKeyboardFocus (true))
         repeatEditor.setText (String (p.repeatCount), false);
 
@@ -379,7 +395,12 @@ void PatternPanel::commitLength()
         refresh();
         return;
     }
-    doc.modify ([v] (Pattern& p) { p.duration = v; });
+    // a typed length is kept as is
+    doc.modify ([v] (Pattern& p)
+                {
+                    p.duration = v;
+                    p.autoLength = false;
+                });
 }
 
 void PatternPanel::commitRepeats()
@@ -413,7 +434,9 @@ void PatternPanel::resized()
     header.removeFromLeft (4);
     header.removeFromLeft (14);
     lengthLabel.setBounds (header.removeFromLeft (textWidth (lengthLabel.getText()) + 10));
-    lengthEditor.setBounds (header.removeFromLeft (56));
+    lengthEditor.setBounds (header.removeFromLeft (70));
+    header.removeFromLeft (4);
+    autoLengthButton.setBounds (header.removeFromLeft (48));
     header.removeFromLeft (6);
     repeatLabel.setBounds (header.removeFromLeft (textWidth (repeatLabel.getText()) + 10));
     repeatEditor.setBounds (header.removeFromLeft (50));

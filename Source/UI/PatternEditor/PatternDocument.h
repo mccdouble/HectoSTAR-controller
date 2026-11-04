@@ -101,6 +101,7 @@ private:
     std::string lastRenderError;
 
     void pushUndo();
+    void fitAutoLength(); // duration = end of the last block, when autoLength
     void changed();
     void render();
     void pruneSelection();

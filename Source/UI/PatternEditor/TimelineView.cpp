@@ -113,8 +113,32 @@ void TimelineView::changeListenerCallback (ChangeBroadcaster* source)
         return;
     }
 
+    applyFillHeight(); // the number of lanes may have changed
+    applyFitTime();    // and the pattern length
     updateScrollBars();
     repaint();
+}
+
+double TimelineView::pxPerSample() const
+{
+    return pxPerSec / kSampleRateHz;
+}
+
+void TimelineView::fitLanesToHeight()
+{
+    fillHeight = true;
+    scrollY = 0;
+    applyFillHeight();
+    updateScrollBars();
+    repaint();
+}
+
+void TimelineView::applyFillHeight()
+{
+    if (! fillHeight)
+        return;
+    const int lanes = std::max (1, (int) doc.laneLeds().size());
+    laneHeight = jlimit ((int) kLaneHeight, (int) kMaxLaneHeight, lanesArea().getHeight() / lanes);
 }
 
 juce::Rectangle<int> TimelineView::lanesArea() const
@@ -138,14 +162,14 @@ double TimelineView::timeForX (float x) const
 
 int TimelineView::laneTop (int index) const
 {
-    return kRulerHeight + index * kLaneHeight - (int) scrollY;
+    return kRulerHeight + index * laneHeight - (int) scrollY;
 }
 
 int TimelineView::laneIndexAt (int y) const
 {
     if (y < kRulerHeight)
         return -1;
-    const int index = (int) std::floor ((y - kRulerHeight + scrollY) / kLaneHeight);
+    const int index = (int) std::floor ((y - kRulerHeight + scrollY) / laneHeight);
     return (index >= 0 && index < (int) doc.laneLeds().size()) ? index : -1;
 }
 
@@ -155,7 +179,7 @@ juce::Rectangle<float> TimelineView::blockRect (const Block& b, int laneIndex) c
     const double end = std::isfinite (b.length) ? b.start + b.length : doc.pattern().duration;
     const float x1 = std::max (x0 + 4.0f, xForTime (end));
     const float top = (float) laneTop (laneIndex) + 3.0f;
-    return { x0, top, x1 - x0, (float) kLaneHeight - 6.0f };
+    return { x0, top, x1 - x0, (float) laneHeight - 6.0f };
 }
 
 double TimelineView::gridStep (double minPixels) const
@@ -176,11 +200,21 @@ double TimelineView::snapTime (double t, bool fine) const
 
 void TimelineView::zoomToFit()
 {
-    const double length = std::max (0.01, doc.pattern().duration);
-    pxPerSec = std::max (1.0, (lanesArea().getWidth() - 10) / length);
-    viewStart = 0;
+    fitTime = true;
+    applyFitTime();
     updateScrollBars();
     repaint();
+}
+
+void TimelineView::applyFitTime()
+{
+    // not mid-drag: the view would shift under the mouse (refits on mouse-up)
+    if (! fitTime || drag != Drag::None || lanesArea().getWidth() <= 50)
+        return;
+    // at least a second, so short patterns aren't stretched across the width
+    const double length = std::max (1.0, doc.pattern().duration);
+    pxPerSec = std::max (1.0, (lanesArea().getWidth() - 10) / length);
+    viewStart = 0;
 }
 
 void TimelineView::updateScrollBars()
@@ -190,7 +224,7 @@ void TimelineView::updateScrollBars()
     hScroll.setRangeLimits (0.0, total, dontSendNotification);
     hScroll.setCurrentRange (viewStart, area.getWidth() / pxPerSec, dontSendNotification);
 
-    const double content = (double) doc.laneLeds().size() * kLaneHeight;
+    const double content = (double) doc.laneLeds().size() * laneHeight;
     scrollY = jlimit (0.0, std::max (0.0, content - area.getHeight()), scrollY);
     vScroll.setRangeLimits (0.0, std::max (content, (double) area.getHeight()), dontSendNotification);
     vScroll.setCurrentRange (scrollY, area.getHeight(), dontSendNotification);
@@ -199,7 +233,10 @@ void TimelineView::updateScrollBars()
 void TimelineView::scrollBarMoved (ScrollBar* bar, double newRangeStart)
 {
     if (bar == &hScroll)
+    {
         viewStart = newRangeStart;
+        fitTime = false;
+    }
     else
         scrollY = newRangeStart;
     repaint();
@@ -211,13 +248,8 @@ void TimelineView::resized()
     hScroll.setBounds (b.removeFromBottom (kScrollSize).withTrimmedLeft (kNameWidth).withTrimmedRight (kScrollSize));
     vScroll.setBounds (b.removeFromRight (kScrollSize).withTrimmedTop (kRulerHeight));
 
-    // show the whole pattern the first time there is room for it
-    if (! fittedOnce && lanesArea().getWidth() > 50)
-    {
-        fittedOnce = true;
-        zoomToFit();
-        return;
-    }
+    applyFitTime();
+    applyFillHeight();
     updateScrollBars();
 }
 
@@ -233,7 +265,7 @@ void TimelineView::paint (Graphics& g)
     for (int i = 0; i < (int) leds.size(); ++i)
     {
         const int top = laneTop (i);
-        if (top + kLaneHeight >= kRulerHeight && top < area.getBottom())
+        if (top + laneHeight >= kRulerHeight && top < area.getBottom())
             paintLane (g, i, leds[(std::size_t) i]);
     }
     g.restoreState();
@@ -299,8 +331,8 @@ void TimelineView::paintLane (Graphics& g, int index, int led)
 {
     const int top = laneTop (index);
     const auto area = lanesArea();
-    const juce::Rectangle<int> lane (area.getX(), top, area.getWidth(), kLaneHeight);
-    const juce::Rectangle<int> name (0, top, kNameWidth, kLaneHeight);
+    const juce::Rectangle<int> lane (area.getX(), top, area.getWidth(), laneHeight);
+    const juce::Rectangle<int> name (0, top, kNameWidth, laneHeight);
 
     const bool ledSelected = doc.selectedLeds().count (led) > 0;
     const Colour text = findColour (ThemeColours::defaultText);
@@ -313,7 +345,7 @@ void TimelineView::paintLane (Graphics& g, int index, int led)
     g.fillRect (name);
     // label: LED and where it is, then what it plays (all of it in the tooltip)
     const auto blocks = blocksOn (doc.pattern(), led);
-    auto rows = name.reduced (8, 3);
+    auto rows = name.withHeight (kLaneHeight).reduced (8, 3); // the label keeps its size in tall lanes
     auto first = rows.removeFromTop (rows.getHeight() / 2);
     g.setColour (text);
     g.setFont (FontOptions (13.0f, Font::bold));
@@ -333,7 +365,7 @@ void TimelineView::paintLane (Graphics& g, int index, int led)
     g.drawText (summary, rows, Justification::centredLeft, true);
 
     g.setColour (findColour (ThemeColours::outline).withAlpha (0.6f));
-    g.drawHorizontalLine (top + kLaneHeight - 1, 0.0f, (float) lane.getRight());
+    g.drawHorizontalLine (top + laneHeight - 1, 0.0f, (float) lane.getRight());
 
     g.saveState();
     g.reduceClipRegion (lane);
@@ -363,11 +395,66 @@ void TimelineView::paintLane (Graphics& g, int index, int led)
     if (data.numSamples > 0 && data.current.size() == (std::size_t) kNumLeds * (std::size_t) data.numSamples)
     {
         const std::uint8_t* samples = data.led (led - 1);
-        const float yBottom = (float) (top + kLaneHeight - 5);
-        const float scale = (float) (kLaneHeight - 18) / (float) kMaxCurrentUa;
+        const float yBottom = (float) (top + laneHeight - 5);
+        const float scale = (float) (laneHeight - 18) / (float) kMaxCurrentUa;
+
+        // current grid in tall lanes, so the DAC's 1 uA steps can be read off
+        {
+            static const int steps[] = { 1, 2, 5, 10, 20, 50 };
+            int step = 100;
+            for (int s : steps)
+                if (s * scale >= 6.0f)
+                {
+                    step = s;
+                    break;
+                }
+            if (laneHeight >= 90)
+            {
+                g.setFont (FontOptions (10.0f));
+                for (int v = 0; v <= kMaxCurrentUa; v += step)
+                {
+                    const float y = yBottom - v * scale;
+                    const bool major = v % (step * 5) == 0 || v == kMaxCurrentUa;
+                    g.setColour (text.withAlpha (major ? 0.18f : 0.07f));
+                    g.drawHorizontalLine ((int) std::round (y), (float) lane.getX(), (float) lane.getRight());
+                    if (major && scale * step * 5 >= 14.0f)
+                    {
+                        g.setColour (text.withAlpha (0.55f));
+                        g.drawText (String (v) + " uA", lane.getX() + 3, (int) y - 12, 50, 11, Justification::left);
+                    }
+                }
+            }
+        }
 
         g.setColour (text.withAlpha (0.9f));
 
+        if (pxPerSample() >= 2.0)
+        {
+            // zoomed in: one flat step per sample, exactly what the DAC outputs
+            const int s0 = std::max (0, (int) std::floor (timeForX ((float) lane.getX()) * kSampleRateHz) - 1);
+            const int s1 = std::min (data.numSamples, (int) std::ceil (timeForX ((float) lane.getRight()) * kSampleRateHz) + 1);
+            Path steps;
+            float prevY = 0;
+            for (int s = s0; s < s1; ++s)
+            {
+                const float x0 = xForTime ((double) s / kSampleRateHz);
+                const float x1 = xForTime ((double) (s + 1) / kSampleRateHz);
+                const float y = yBottom - samples[s] * scale;
+                if (s == s0)
+                    steps.startNewSubPath (x0, y);
+                else
+                    steps.lineTo (x0, prevY), steps.lineTo (x0, y);
+                steps.lineTo (x1, y);
+                prevY = y;
+            }
+            g.strokePath (steps, PathStrokeType (1.5f));
+
+            // sample instants
+            if (pxPerSample() >= 8.0)
+                for (int s = s0; s < s1; ++s)
+                    g.fillEllipse (xForTime ((double) s / kSampleRateHz) - 2.0f, yBottom - samples[s] * scale - 2.0f, 4.0f, 4.0f);
+        }
+        else
         for (int x = lane.getX(); x < lane.getRight(); ++x)
         {
             const double ta = timeForX ((float) x);
@@ -431,8 +518,23 @@ String TimelineView::getTooltip()
 {
     const int index = laneIndexAt (hoverPos.y);
     const auto leds = doc.laneLeds();
-    if (index < 0 || index >= (int) leds.size() || hoverPos.x >= kNameWidth)
+    if (index < 0 || index >= (int) leds.size())
         return {};
+
+    if (hoverPos.x >= kNameWidth)
+    {
+        // zoomed in: the sample under the mouse
+        const PatternData& data = doc.rendered();
+        if (pxPerSample() < 2.0 || data.numSamples <= 0
+            || data.current.size() != (std::size_t) kNumLeds * (std::size_t) data.numSamples)
+            return {};
+        const int s = (int) std::floor (timeForX ((float) hoverPos.x) * kSampleRateHz);
+        if (s < 0 || s >= data.numSamples)
+            return {};
+        const int led = leds[(std::size_t) index];
+        return "LED " + String (led) + ", sample " + String (s) + " (" + String (s * 1000.0 / kSampleRateHz, 2) + " ms): "
+               + String ((int) data.led (led - 1)[s]) + " uA";
+    }
 
     const int led = leds[(std::size_t) index];
     String tip = "LED " + String (led) + " (" + ledPlace (led) + "). Click to select it, Ctrl-click to add or remove it.";
@@ -571,6 +673,8 @@ void TimelineView::mouseUp (const MouseEvent&)
 {
     drag = Drag::None;
     dragOrig.clear();
+    if (fitTime)
+        zoomToFit();
 }
 
 void TimelineView::mouseDoubleClick (const MouseEvent& e)
@@ -605,17 +709,28 @@ void TimelineView::mouseDoubleClick (const MouseEvent& e)
 
 void TimelineView::mouseWheelMove (const MouseEvent& e, const MouseWheelDetails& wheel)
 {
-    if (e.mods.isCommandDown())
+    if (e.mods.isAltDown() || (e.mods.isCommandDown() && e.mods.isShiftDown()))
+    {
+        // lane height, keeping the point under the mouse in place
+        const double content = (e.position.y - kRulerHeight + scrollY) / laneHeight;
+        fillHeight = false;
+        laneHeight = jlimit ((int) kLaneHeight, (int) kMaxLaneHeight,
+                             (int) std::round (laneHeight * std::exp (wheel.deltaY * 1.5)));
+        scrollY = std::max (0.0, content * laneHeight - (e.position.y - kRulerHeight));
+    }
+    else if (e.mods.isCommandDown())
     {
         const double anchor = timeForX (e.position.x);
         const double factor = std::exp (wheel.deltaY * 1.5);
         pxPerSec = jlimit (1.0, 2.0e6, pxPerSec * factor);
+        fitTime = false;
         viewStart = std::max (0.0, anchor - (e.position.x - kNameWidth) / pxPerSec);
     }
     else if (e.mods.isShiftDown() || std::fabs (wheel.deltaX) > std::fabs (wheel.deltaY))
     {
         const double d = (std::fabs (wheel.deltaX) > std::fabs (wheel.deltaY) ? wheel.deltaX : wheel.deltaY);
         viewStart = std::max (0.0, viewStart - d * 200.0 / pxPerSec);
+        fitTime = false;
     }
     else
     {

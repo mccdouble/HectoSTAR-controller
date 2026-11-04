@@ -8,7 +8,10 @@
     the one), Ctrl/Cmd or Shift to add to the selection. Drag to move, drag
     an edge to resize; moves snap to the ruler grid (hold Alt for single
     samples). Double-click an empty spot to add a block there.
-    Wheel: scroll lanes; Shift+wheel: scroll time; Ctrl/Cmd+wheel: zoom.
+    Wheel: scroll lanes; Shift+wheel: scroll time; Ctrl/Cmd+wheel: zoom
+    time; Alt+wheel (or Ctrl+Shift+wheel): zoom lane height. Zoomed in
+    far enough, the current is drawn as one step per 20 kHz sample (no
+    interpolation) and hovering it shows that sample's value.
     Keys: Delete removes the selected blocks, Ctrl/Cmd+A selects all.
 
     ------------------------------------------------------------------
@@ -30,8 +33,13 @@ public:
     explicit TimelineView (PatternDocument& doc);
     ~TimelineView() override;
 
-    /** Zooms so the whole pattern fits the width. */
+    /** Shows 0 .. max (1 s, pattern length) across the width, and keeps
+        doing so as the pattern changes until time is zoomed or scrolled by hand. */
     void zoomToFit();
+
+    /** Makes the lanes as tall as fits (all lanes visible), and keeps them
+        filling the height until the lane height is zoomed by hand. */
+    void fitLanesToHeight();
 
     /** Shows the playhead of this playback (and scrolls to follow it). */
     void setPlayback (Playback* p);
@@ -53,7 +61,8 @@ public:
     bool keyPressed (const KeyPress& key) override;
 
     static constexpr int kRulerHeight = 24;
-    static constexpr int kLaneHeight = 44;
+    static constexpr int kLaneHeight = 44;     // smallest (default) lane height
+    static constexpr int kMaxLaneHeight = 1200;
     static constexpr int kNameWidth = 230;
     static constexpr int kScrollSize = 12;
 
@@ -67,7 +76,14 @@ private:
     Point<int> hoverPos;
     double viewStart = 0.0;
     double scrollY = 0.0;
-    bool fittedOnce = false;
+    bool fitTime = true; // zoomToFit after every change until zoomed by hand
+    void applyFitTime();
+    int laneHeight = kLaneHeight;
+    bool fillHeight = false; // fitLanesToHeight until zoomed by hand
+    void applyFillHeight();
+
+    /** Pixels per 20 kHz sample at the current zoom. */
+    double pxPerSample() const;
 
     enum class Drag
     {

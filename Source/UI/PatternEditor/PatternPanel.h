@@ -57,6 +57,7 @@ private:
     Label playTime;
     EditorButton dockButton { "Pop out" };
     EditorButton inUseButton { "Select LEDs in use" };
+    EditorButton fitHeightButton { "Fit height" };
     TimelineView timeline;
 
     void changeListenerCallback (ChangeBroadcaster*) override { updatePlayControls(); }
@@ -95,6 +96,7 @@ private:
     Playback playback;
     Label lengthLabel { {}, "Pattern length (s)" }, repeatLabel { {}, "Repeats" };
     TextEditor lengthEditor, repeatEditor;
+    EditorButton autoLengthButton { "Auto" }; // length follows the last block
     Label usageLabel, boardLabel;
 
     WaveformDesigner designer;
