@@ -9,7 +9,6 @@
 #include "PatternModel.h"
 #include "Formula.h"
 #include "Json.h"
-#include "MatlabMath.h"
 
 #include <algorithm>
 #include <cmath>
@@ -75,7 +74,7 @@ double evalBreakpoints (const std::vector<Breakpoint>& p, Interpolation interp, 
         const double period = p.back().time;
         if (! (period > 0))
             return p.back().value;
-        tt = matlab::mod (t, period);
+        tt = mod (t, period);
     }
     else if (tt < p.front().time || tt > p.back().time)
     {
@@ -103,7 +102,7 @@ double evalBreakpoints (const std::vector<Breakpoint>& p, Interpolation interp, 
     {
         case Interpolation::Step: return a.value;
         case Interpolation::Linear: return a.value + (b.value - a.value) * u;
-        case Interpolation::Smooth: return a.value + (b.value - a.value) * (1.0 - std::cos (matlab::kPi * u)) / 2.0;
+        case Interpolation::Smooth: return a.value + (b.value - a.value) * (1.0 - std::cos (kPi * u)) / 2.0;
     }
 
     return a.value;
@@ -175,7 +174,7 @@ double naturalLength (const WaveSpec& wave)
         case WaveKind::Builtin:
         {
             const ChannelWaveform& w = wave.builtin;
-            const double count = matlab::round (w.freq);
+            const double count = std::round (w.freq);
 
             switch (w.type)
             {
@@ -221,7 +220,7 @@ std::size_t encodedSizeBytes (const Pattern& pattern)
 {
     if (! (pattern.duration > 0) || ! std::isfinite (pattern.duration))
         return 0;
-    const double n = matlab::round (pattern.duration * kSampleRateHz);
+    const double n = std::round (pattern.duration * kSampleRateHz);
     const double padded = std::ceil (n / kSamplesPerPage) * kSamplesPerPage;
     return (std::size_t) padded * kBytesPerFrame;
 }

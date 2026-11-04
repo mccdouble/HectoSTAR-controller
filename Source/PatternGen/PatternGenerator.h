@@ -101,6 +101,25 @@ std::uint8_t toDacCurrent (double microamps);
 /** Time of sample i in seconds, computed like MATLAB's (0:N-1)/fs. */
 inline double sampleTimeSec (int i) { return (double) i / kSampleRateHz; }
 
+constexpr double kPi = 3.141592653589793;
+constexpr double kTwoPi = 2.0 * kPi;
+
+/** Remainder of x / y with the sign of y, like MATLAB's mod. Unlike plain
+    std::fmod it returns exactly 0 when x is a whole number of periods to
+    within rounding (e.g. mod(0.15, 0.05)), which keeps pulse and cycle edges
+    on the right sample. */
+double mod (double x, double y);
+
+/** Same, with the sign of x (MATLAB's rem). */
+double rem (double x, double y);
+
+/** Square wave of t (radians): +1 for the first dutyPercent of each 2*pi
+    cycle, else -1 (MATLAB's square). */
+double square (double t, double dutyPercent = 50.0);
+
+/** Sawtooth of t (radians) rising from -1 to 1 each 2*pi cycle (MATLAB's sawtooth). */
+double sawtooth (double t);
+
 /** Renders the MATLAB table: waves[i] drives GUI channel i + 1. Returns false
     (and sets error) for a non-positive duration. */
 bool renderPattern (const std::array<ChannelWaveform, kNumLeds>& waves,

@@ -7,7 +7,6 @@
 */
 
 #include "Formula.h"
-#include "MatlabMath.h"
 #include "PatternGenerator.h"
 
 #include <cctype>
@@ -429,7 +428,7 @@ private:
         else if (name == "fs")
             n.op = Op::VarFs;
         else if (name == "pi")
-            n.value = matlab::kPi;
+            n.value = kPi;
         else if (name == "e")
             n.value = 2.718281828459045;
         else
@@ -520,18 +519,18 @@ double Formula::eval (int index, double t, double T) const
         }
         case Fn::Floor: return std::floor (arg (0));
         case Fn::Ceil: return std::ceil (arg (0));
-        case Fn::Round: return matlab::round (arg (0));
+        case Fn::Round: return std::round (arg (0));
         case Fn::Fix: return std::trunc (arg (0));
-        case Fn::Min: return matlab::min (arg (0), arg (1));
-        case Fn::Max: return matlab::max (arg (0), arg (1));
-        case Fn::Mod: return matlab::mod (arg (0), arg (1));
-        case Fn::Rem: return matlab::rem (arg (0), arg (1));
+        case Fn::Min: return std::fmin (arg (0), arg (1));
+        case Fn::Max: return std::fmax (arg (0), arg (1));
+        case Fn::Mod: return mod (arg (0), arg (1));
+        case Fn::Rem: return rem (arg (0), arg (1));
         case Fn::Hypot: return std::hypot (arg (0), arg (1));
-        case Fn::Clamp: return matlab::min (matlab::max (arg (0), arg (1)), arg (2));
+        case Fn::Clamp: return std::fmin (std::fmax (arg (0), arg (1)), arg (2));
         case Fn::If: return arg (0) != 0 ? arg (1) : arg (2);
         case Fn::Step: return arg (0) >= 0 ? 1.0 : 0.0;
-        case Fn::Square: return n.numArgs == 2 ? matlab::square (arg (0), arg (1)) : matlab::square (arg (0));
-        case Fn::Sawtooth: return matlab::sawtooth (arg (0));
+        case Fn::Square: return n.numArgs == 2 ? square (arg (0), arg (1)) : square (arg (0));
+        case Fn::Sawtooth: return sawtooth (arg (0));
     }
 
     return NAN;

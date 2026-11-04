@@ -4,14 +4,13 @@
     HectoSTAR pattern stim generator. See PatternGenerator.h.
 
     Every expression below follows the evaluation order of PatternGenGUI.m
-    (and of MATLAB's mod/rem/square/sawtooth) so floating-point rounding,
-    and therefore every output byte, matches the MATLAB tool.
+    so floating-point rounding, and therefore every output byte, matches the
+    MATLAB tool.
 
     ------------------------------------------------------------------
 */
 
 #include "PatternGenerator.h"
-#include "MatlabMath.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -23,15 +22,15 @@ namespace PatternGen
 namespace
 {
 
-using matlab::kPi;
-using matlab::kTwoPi;
-
-double mMin (double a, double b) { return matlab::min (a, b); }
-double mMax (double a, double b) { return matlab::max (a, b); }
-double mRound (double x) { return matlab::round (x); }
-double mMod (double x, double y) { return matlab::mod (x, y); }
-double mSquare (double t, double duty) { return matlab::square (t, duty); }
-double mSawtooth (double t) { return matlab::sawtooth (t); }
+// True when x is a whole number of y's to within rounding (only checked for
+// non-integer y, as MATLAB does; integer y gives an exact fmod anyway).
+bool isWholeMultiple (double x, double y)
+{
+    if (! (y > std::floor (y)))
+        return false;
+    const double q = std::fabs (x / y);
+    return std::fabs (q - std::floor (q + 0.5)) <= DBL_EPSILON * q;
+}
 
 double sampleTime (int i) { return sampleTimeSec (i); } // t = (0:N-1)/fs
 
@@ -42,7 +41,7 @@ void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* 
 {
     std::fill (out, out + (end - first), 0.0);
 
-    const double amp = mMin (cfg.amp, (double) kMaxCurrentUa); // min(data{r,4},100)
+    const double amp = std::fmin (cfg.amp, (double) kMaxCurrentUa); // min(data{r,4},100)
 
     switch (cfg.type)
     {
@@ -60,13 +59,13 @@ void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* 
 
         case WaveType::FixedSine:
         {
-            const double nCycles = mRound (cfg.freq);
+            const double nCycles = std::round (cfg.freq);
             const double T = cfg.offset;
             const double tStart = cfg.delay;
 
             if (nCycles > 0 && std::isfinite (T) && T > 0)
             {
-                const double duty = mMax (0.0, mMin (100.0, cfg.duty));
+                const double duty = std::fmax (0.0, std::fmin (100.0, cfg.duty));
                 const double activeT = (duty / 100.0) * T;
                 const double tEnd = tStart + nCycles * T;
 
@@ -75,7 +74,7 @@ void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* 
                     const double t = sampleTime (i);
                     if (t >= tStart && t < tEnd)
                     {
-                        const double phase = mMod (t - tStart, T);
+                        const double phase = mod (t - tStart, T);
                         if (activeT > 0 && phase < activeT)
                             out[i - first] = amp * std::sin ((phase / activeT) * kTwoPi);
                     }
@@ -89,7 +88,7 @@ void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* 
             {
                 const double t = sampleTime (i);
                 if (t >= cfg.delay)
-                    out[i - first] = cfg.offset + amp * mSquare (kTwoPi * cfg.freq * (t - cfg.delay), cfg.duty);
+                    out[i - first] = cfg.offset + amp * square (kTwoPi * cfg.freq * (t - cfg.delay), cfg.duty);
             }
             break;
 
@@ -98,19 +97,19 @@ void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* 
             {
                 const double t = sampleTime (i);
                 if (t >= cfg.delay)
-                    out[i - first] = cfg.offset + amp * mSawtooth (kTwoPi * cfg.freq * (t - cfg.delay));
+                    out[i - first] = cfg.offset + amp * sawtooth (kTwoPi * cfg.freq * (t - cfg.delay));
             }
             break;
 
         case WaveType::FixedSawtooth:
         {
-            const double nCycles = mRound (cfg.freq);
+            const double nCycles = std::round (cfg.freq);
             const double T = cfg.offset;
             const double tStart = cfg.delay;
 
             if (nCycles > 0 && std::isfinite (T) && T > 0)
             {
-                const double duty = mMax (0.0, mMin (100.0, cfg.duty));
+                const double duty = std::fmax (0.0, std::fmin (100.0, cfg.duty));
                 const double rampT = (duty / 100.0) * T;
                 const double tEnd = tStart + nCycles * T;
 
@@ -119,7 +118,7 @@ void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* 
                     const double t = sampleTime (i);
                     if (t >= tStart && t < tEnd)
                     {
-                        const double phase = mMod (t - tStart, T);
+                        const double phase = mod (t - tStart, T);
                         if (rampT > 0 && phase < rampT)
                             out[i - first] = amp * (phase / rampT);
                     }
@@ -148,7 +147,7 @@ void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* 
 
         case WaveType::FixedPulse:
         {
-            const double nPulses = mRound (cfg.freq);
+            const double nPulses = std::round (cfg.freq);
             const double period = cfg.offset;
 
             if (nPulses > 0 && period > 0)
@@ -161,7 +160,7 @@ void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* 
                     if (t >= cfg.delay)
                     {
                         const double td = t - cfg.delay;
-                        if (td < totalTime && mMod (td, period) / period < (cfg.duty / 100.0))
+                        if (td < totalTime && mod (td, period) / period < (cfg.duty / 100.0))
                             out[i - first] = amp;
                     }
                 }
@@ -171,14 +170,14 @@ void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* 
 
         case WaveType::Wavelet:
         {
-            double nPeaks = mRound (cfg.freq);
+            double nPeaks = std::round (cfg.freq);
             const double D = cfg.offset;
             const double tStart = cfg.delay;
 
             if (! std::isfinite (D) || D <= 0 || ! std::isfinite (nPeaks) || nPeaks < 1)
                 break;
 
-            if (mMod (nPeaks, 2.0) == 0)
+            if (mod (nPeaks, 2.0) == 0)
                 nPeaks = nPeaks + 1;
 
             const double tEnd = tStart + D;
@@ -202,7 +201,7 @@ void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* 
 
         case WaveType::PulseStaircase:
         {
-            const double nPulses = mRound (cfg.freq);
+            const double nPulses = std::round (cfg.freq);
             const double A0 = amp;
             const double dA = cfg.step;
             const double period = cfg.offset;
@@ -219,7 +218,7 @@ void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* 
                     {
                         const double tau = t - tStart;
                         const double pulseIdx = std::floor (tau / period);
-                        if (mMod (tau, period) / period < (cfg.duty / 100.0))
+                        if (mod (tau, period) / period < (cfg.duty / 100.0))
                             out[i - first] = A0 + dA * pulseIdx;
                     }
                 }
@@ -238,7 +237,7 @@ std::uint8_t toDacValue (double v)
         v = 0;
     if (v > kMaxCurrentUa)
         v = kMaxCurrentUa;
-    return (std::uint8_t) mRound (v);
+    return (std::uint8_t) std::round (v);
 }
 
 struct NamedType
@@ -291,6 +290,36 @@ constexpr std::array<int, kNumLeds> kDemoBoard = {
 
 } // namespace
 
+double mod (double x, double y)
+{
+    if (y == 0)
+        return x;
+    if (isWholeMultiple (x, y))
+        return 0.0;
+    double r = std::fmod (x, y);
+    if (r != 0 && (r < 0) != (y < 0))
+        r += y;
+    return r;
+}
+
+double rem (double x, double y)
+{
+    return isWholeMultiple (x, y) ? 0.0 : std::fmod (x, y);
+}
+
+double square (double t, double dutyPercent)
+{
+    return mod (t, kTwoPi) < kTwoPi * dutyPercent / 100.0 ? 1.0 : -1.0;
+}
+
+double sawtooth (double t)
+{
+    const double rt = rem (t, kTwoPi) * (1.0 / kTwoPi);
+    if (rt == 0)
+        return -1.0;
+    return ((t < 0 ? 1.0 : 0.0) + rt - 0.5) * 2.0;
+}
+
 const char* waveTypeName (WaveType type)
 {
     for (const auto& t : kTypeNames)
@@ -309,7 +338,7 @@ WaveType waveTypeFromName (const std::string& name)
 
 int numSamplesForDuration (double durationSec)
 {
-    return (int) mRound (durationSec * kSampleRateHz);
+    return (int) std::round (durationSec * kSampleRateHz);
 }
 
 void renderWaveformRange (const ChannelWaveform& wave, int firstSample, int endSample, double* out)
