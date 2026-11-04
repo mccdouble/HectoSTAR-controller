@@ -52,6 +52,15 @@ public:
     /** Sets the probe (follows the probe chosen in the stim panel; not an undo step). */
     void setProbe (ProbeMapping probe);
 
+    /** Sets how many times the board plays the pattern (not an undo step,
+        and not a content change: the flash contents stay the same). */
+    void setRepeatCount (int repeats);
+
+    /** Goes up whenever what would be written to flash may have changed
+        (everything but the repeat count). Cheap way to tell whether the
+        board still holds this pattern. */
+    std::uint64_t contentVersion() const { return version; }
+
     /** Replaces the whole pattern (new / open); clears undo and selection. */
     void reset (const Pattern& p, const File& file);
 
@@ -88,6 +97,7 @@ private:
     std::set<int> ledSelection;
 
     PatternData renderedData;
+    std::uint64_t version = 1;
     std::string lastRenderError;
 
     void pushUndo();

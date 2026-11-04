@@ -74,6 +74,7 @@ void PatternDocument::redo()
 void PatternDocument::reset (const Pattern& p, const File& f)
 {
     current = p;
+    ++version;
     file = f;
     undoStack.clear();
     redoStack.clear();
@@ -84,11 +85,22 @@ void PatternDocument::reset (const Pattern& p, const File& f)
     sendChangeMessage();
 }
 
+void PatternDocument::setRepeatCount (int repeats)
+{
+    repeats = std::max (1, repeats);
+    if (current.repeatCount == repeats)
+        return;
+    current.repeatCount = repeats;
+    dirty = true;
+    sendChangeMessage();
+}
+
 void PatternDocument::setProbe (ProbeMapping probe)
 {
     if (current.probe == probe)
         return;
     current.probe = probe;
+    ++version;
     for (auto& p : undoStack)
         p.probe = probe;
     for (auto& p : redoStack)
@@ -99,6 +111,7 @@ void PatternDocument::setProbe (ProbeMapping probe)
 void PatternDocument::changed()
 {
     dirty = true;
+    ++version;
     pruneSelection();
     startTimer (30); // coalesce re-renders while dragging
     sendChangeMessage();

@@ -27,6 +27,9 @@ public:
     /** Shows this block's waveform (its start time is ignored). */
     void setBlock (const Block& b);
 
+    /** Shows exactly length s of the block, captioned "title (length)". */
+    void setBlock (const Block& b, double length, const String& title);
+
     /** One cycle (default) or the whole block. */
     void setWhole (bool whole);
     bool showsWhole() const { return whole; }
@@ -39,6 +42,8 @@ public:
 private:
     Block block;
     bool whole = false;
+    double fixedLength = 0; // > 0: set by the titled setBlock
+    String fixedTitle;
     std::vector<double> samples;
     double length = 0;
     String caption;

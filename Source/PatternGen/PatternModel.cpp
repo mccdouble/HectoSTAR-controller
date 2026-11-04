@@ -600,6 +600,63 @@ bool renderPattern (const Pattern& pattern, PatternData& out, std::string& error
     return true;
 }
 
+bool decodePatternFile (const std::vector<std::uint8_t>& bytes, ProbeMapping mapping, Pattern& pattern, std::string& error)
+{
+    if (bytes.empty() || bytes.size() % kBytesPerFrame != 0)
+    {
+        error = "Not a pattern file: the size must be a whole number of 64-byte frames.";
+        return false;
+    }
+
+    const std::size_t numSamples = bytes.size() / kBytesPerFrame;
+    if (numSamples > kMaxSamples)
+    {
+        error = "The file is larger than the board's 16 MB flash.";
+        return false;
+    }
+
+    const auto& reorder = reorderForMapping (mapping);
+
+    Pattern p;
+    p.probe = mapping;
+    p.duration = (double) numSamples / kSampleRateHz;
+
+    for (int slot = 0; slot < kNumLeds; ++slot)
+    {
+        const int led = reorder[(std::size_t) slot];
+
+        std::size_t first = numSamples, last = 0;
+        for (std::size_t s = 0; s < numSamples; ++s)
+        {
+            if (bytes[s * kBytesPerFrame + (std::size_t) slot] != 0)
+            {
+                first = std::min (first, s);
+                last = s;
+            }
+        }
+        if (first == numSamples)
+            continue; // never on
+
+        Block b;
+        b.id = nextBlockId (p);
+        b.led = led;
+        b.start = (double) first / kSampleRateHz;
+        b.wave.kind = WaveKind::Samples;
+        b.wave.samples.reserve (last - first + 1);
+        for (std::size_t s = first; s <= last; ++s)
+            b.wave.samples.push_back (bytes[s * kBytesPerFrame + (std::size_t) slot]);
+        b.length = (double) b.wave.samples.size() / kSampleRateHz;
+        p.blocks.push_back (std::move (b));
+    }
+
+    std::sort (p.blocks.begin(), p.blocks.end(), [] (const Block& a, const Block& b) { return a.led < b.led; });
+    for (std::size_t i = 0; i < p.blocks.size(); ++i)
+        p.blocks[i].id = (int) i + 1;
+
+    pattern = std::move (p);
+    return true;
+}
+
 std::string toJson (const Pattern& pattern)
 {
     json::Value root = json::Value::makeObject();

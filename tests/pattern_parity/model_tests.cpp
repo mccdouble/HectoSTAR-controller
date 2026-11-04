@@ -594,6 +594,26 @@ static void testShapedTrains()
                && lg.shaped.count == g.count && lg.shaped.rate == g.rate && lg.shaped.step == g.step && lg.shaped.equalCharge,
            "shaped json round trip");
     CHECK (encode (loaded) == encode (pj), "shaped render after round trip");
+
+    // a pattern file reads back into a design that encodes to the same bytes
+    for (auto probe : { ProbeMapping::FourShankChronic, ProbeMapping::FourShankAcute, ProbeMapping::DemoBoard })
+    {
+        Pattern src;
+        src.probe = probe;
+        src.duration = 0.5;
+        src.blocks.push_back (shapedBlock (1, 3, 0.01, sq));
+        src.blocks.push_back (shapedBlock (2, 40, 0.2, g));
+        src.blocks.push_back (formulaBlock (3, 64, 0.1, 0.3, "50*(1+sin(2*pi*8*t))"));
+        const auto bytes = encode (src);
+        Pattern back;
+        std::string err;
+        CHECK (decodePatternFile (bytes, probe, back, err), "decode: %s", err.c_str());
+        CHECK (back.blocks.size() == 3 && activeLeds (back) == activeLeds (src), "decoded LEDs");
+        CHECK (encode (back) == bytes, "decoded pattern re-encodes to the same bytes (%s)", probeMappingName (probe));
+    }
+    Pattern bad;
+    std::string err;
+    CHECK (! decodePatternFile (std::vector<std::uint8_t> (100, 1), ProbeMapping::FourShankChronic, bad, err), "100 bytes is not a pattern file");
 }
 
 int main (int argc, char** argv)

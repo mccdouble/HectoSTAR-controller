@@ -89,6 +89,15 @@ WaveformPreview::WaveformPreview()
 void WaveformPreview::setBlock (const Block& b)
 {
     block = b;
+    fixedLength = 0;
+    recompute();
+}
+
+void WaveformPreview::setBlock (const Block& b, double len, const String& title)
+{
+    block = b;
+    fixedLength = len;
+    fixedTitle = title;
     recompute();
 }
 
@@ -102,7 +111,12 @@ void WaveformPreview::setWhole (bool w)
 
 void WaveformPreview::recompute()
 {
-    if (whole)
+    if (fixedLength > 0)
+    {
+        length = fixedLength;
+        caption = fixedTitle + " (" + msLabel (length) + ")";
+    }
+    else if (whole)
     {
         const double natural = naturalLength (block.wave);
         length = natural > 0 ? natural : (block.length > 0 ? block.length : 1.0);

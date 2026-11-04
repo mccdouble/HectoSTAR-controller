@@ -99,98 +99,116 @@ constexpr float kShankH = 500.0f;
 constexpr float kShankGap = 16.0f;
 constexpr int kProbeColumnW = 495; // the settings panel starts right of this
 constexpr int kTopBarH = 46;
+constexpr int kSelectRowY = (int) (kProbeY + kShankH + 12.0f);
 
-Colour ledColour() { return Colour (0xff4169e1); } // royal blue, like the pulse-mode ticks
+Colour ledColour() { return Colour (0xff4169e1); } // royal blue: has a waveform / will pulse
+
+/** "1-4, 9, 17-20" for a set of LED numbers. */
+String formatLedRange (const std::set<int>& leds)
+{
+    String out;
+    auto it = leds.begin();
+    while (it != leds.end())
+    {
+        const int first = *it;
+        int last = first;
+        auto next = std::next (it);
+        while (next != leds.end() && *next == last + 1)
+        {
+            last = *next;
+            ++next;
+        }
+        if (out.isNotEmpty())
+            out << ", ";
+        out << first;
+        if (last > first)
+            out << "-" << last;
+        it = next;
+    }
+    return out;
+}
+
+/** Parses "1-4, 9, 17-20" (as PatternGenGUI.m's parseRangeString). Returns
+    false if anything is not a number, a range a-b with a <= b, or 1..maxLed. */
+bool parseLedRange (const String& text, int maxLed, std::set<int>& leds)
+{
+    leds.clear();
+    StringArray parts;
+    parts.addTokens (text, ",;", "");
+    for (auto part : parts)
+    {
+        part = part.trim();
+        if (part.isEmpty())
+            continue;
+        const int dash = part.indexOfChar ('-');
+        const String a = dash < 0 ? part : part.substring (0, dash).trim();
+        const String b = dash < 0 ? part : part.substring (dash + 1).trim();
+        if (! a.containsOnly ("0123456789") || ! b.containsOnly ("0123456789") || a.isEmpty() || b.isEmpty())
+            return false;
+        const int lo = a.getIntValue(), hi = b.getIntValue();
+        if (lo < 1 || hi > maxLed || lo > hi)
+            return false;
+        for (int i = lo; i <= hi; ++i)
+            leds.insert (i);
+    }
+    return true;
+}
 
 } // namespace
 
-/** Pattern mode: draws the LEDs on the probe (filled when they have a
-    waveform, ringed when selected) and selects them: click, Ctrl/Cmd-click
-    to toggle, Shift-click to add, drag across LEDs to add them. */
+/** The LEDs on the probe drawing, the same in both modes: numbered buttons,
+    click to toggle. Selected LEDs are highlighted; in pattern mode LEDs
+    with a waveform are blue, in pulse mode the selected (ticked) LEDs are
+    the ones that pulse. */
 class ChannelList::ProbeLedOverlay : public Component,
-                                     public TooltipClient,
-                                     private ChangeListener
+                                     public TooltipClient
 {
 public:
-    ProbeLedOverlay (ChannelList& owner_, PatternEditor::PatternDocument& d) : owner (owner_), doc (d)
-    {
-        doc.addChangeListener (this);
-    }
-
-    ~ProbeLedOverlay() override { doc.removeChangeListener (this); }
+    explicit ProbeLedOverlay (ChannelList& owner_) : owner (owner_) {}
 
     void paint (Graphics& g) override
     {
-        std::set<int> used;
-        for (int led : PatternGen::activeLeds (doc.pattern()))
-            used.insert (led);
+        const auto sel = owner.ledSelection();
+        const bool pattern = owner.selectedStimOutputType != 0;
+        const Colour accent = findColour (ThemeColours::highlightedFill);
 
         for (int i = 0; i < owner.visibleLeds(); ++i)
         {
             const int led = i + 1;
             const auto c = owner.ledCentre (i);
-            const juce::Rectangle<float> r (c.x - 9.0f, c.y - 9.0f, 18.0f, 18.0f);
-            const bool isSel = doc.selectedLeds().count (led) > 0;
+            const juce::Rectangle<float> r (c.x - 10.0f, c.y - 10.0f, 20.0f, 20.0f);
+            const bool isSel = sel.count (led) > 0;
+            const bool blue = pattern ? owner.ledHasWaveform (led) : isSel;
 
-            if (isSel)
+            if (pattern && isSel)
             {
-                g.setColour (Colours::white);
-                g.fillEllipse (r.expanded (4.0f));
+                g.setColour (accent);
+                g.fillEllipse (r.expanded (3.5f));
             }
 
-            g.setColour (used.count (led) > 0 ? ledColour() : Colours::white.withAlpha (0.35f));
+            g.setColour (blue ? ledColour() : Colours::white.withAlpha (isEnabled() ? 0.45f : 0.2f));
             g.fillEllipse (r);
             g.setColour (Colours::black.withAlpha (0.8f));
-            g.drawEllipse (r, isSel ? 2.0f : 1.2f);
-        }
+            g.drawEllipse (r, 1.2f);
 
-        g.setColour (Colours::black);
-        g.setFont (FontOptions (12.0f));
-        g.drawText ("Click LEDs to select them (Ctrl-click or drag for more). Blue = has a waveform.",
-                    10, (int) (kProbeY + kShankH + 8), kProbeColumnW - 20, 16, Justification::centredLeft);
+            g.setColour (blue ? Colours::white : Colours::black);
+            g.setFont (FontOptions (10.0f, Font::bold));
+            g.drawText (String (led), r.toNearestInt(), Justification::centred);
+        }
     }
 
     void mouseDown (const MouseEvent& e) override
     {
         const int led = ledAt (e.position);
-        auto sel = doc.selectedLeds();
-        const auto mods = e.mods;
-
-        if (led == 0)
-        {
-            if (! mods.isCommandDown() && ! mods.isShiftDown())
-                select ({});
-            dragAdds = false;
+        if (led == 0 || ! isEnabled())
             return;
-        }
 
-        if (mods.isCommandDown())
-        {
-            if (sel.count (led) > 0)
-                sel.erase (led);
-            else
-                sel.insert (led);
-        }
-        else if (mods.isShiftDown())
-            sel.insert (led);
+        auto sel = owner.ledSelection();
+        if (sel.count (led) > 0)
+            sel.erase (led);
         else
-            sel = { led };
-
-        dragAdds = true;
-        select (sel);
-    }
-
-    void mouseDrag (const MouseEvent& e) override
-    {
-        if (! dragAdds)
-            return;
-        const int led = ledAt (e.position);
-        if (led != 0 && doc.selectedLeds().count (led) == 0)
-        {
-            auto sel = doc.selectedLeds();
             sel.insert (led);
-            select (sel);
-        }
+        owner.setLedSelection (sel);
     }
 
     void mouseMove (const MouseEvent& e) override { hovered = ledAt (e.position); }
@@ -201,24 +219,14 @@ public:
             return {};
         const int row = PatternEditor::rowFromBottom (hovered) + 1;
         return "LED " + String (hovered) + " (shank " + String (PatternEditor::shankOf (hovered)) + ", " + String (row)
-               + (row == 1 ? "st" : row == 2 ? "nd" : row == 3 ? "rd" : "th") + " from the tip)";
+               + (row == 1 ? "st" : row == 2 ? "nd" : row == 3 ? "rd" : "th") + " from the tip). Click to select or deselect.";
     }
 
-    bool hitTest (int, int y) override { return y >= kTopBarH; } // leave the top bar to its controls
+    bool hitTest (int x, int y) override { return ledAt ({ (float) x, (float) y }) != 0; }
 
 private:
     ChannelList& owner;
-    PatternEditor::PatternDocument& doc;
-    bool dragAdds = false;
     int hovered = 0;
-
-    void changeListenerCallback (ChangeBroadcaster*) override { repaint(); }
-
-    void select (std::set<int> leds)
-    {
-        doc.setSelectedBlocks ({});
-        doc.setSelectedLeds (std::move (leds));
-    }
 
     int ledAt (Point<float> p) const
     {
@@ -252,7 +260,7 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
 
     //output mode: pulse or pattern (also switches the board's output)
     pulseModeButton = std::make_unique<ColourButton> ("Pulse", FontOptions (14.0f));
-    pulseModeButton->setTooltip ("One pulse train on every ticked LED");
+    pulseModeButton->setTooltip ("One pulse train on every selected LED");
     pulseModeButton->addListener (this);
     addAndMakeVisible (pulseModeButton.get());
     patternModeButton = std::make_unique<ColourButton> ("Pattern", FontOptions (14.0f));
@@ -276,6 +284,30 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
     uploadStimParamButton = std::make_unique<ColourButton> ("Upload pulse settings", FontOptions (14.0f));
     uploadStimParamButton->addListener (this);
     addAndMakeVisible (uploadStimParamButton.get());
+
+    //LED selection under the probe (both modes): a range, all, none
+    rangeLabel = std::make_unique<Label> ("Range Label", "LEDs");
+    rangeLabel->setJustificationType (Justification::centredRight);
+    addAndMakeVisible (rangeLabel.get());
+    rangeEditor = std::make_unique<TextEditor> ("LED Range");
+    rangeEditor->setTextToShowWhenEmpty ("e.g. 1-16, 33", Colours::grey);
+    rangeEditor->setTooltip ("Type LED numbers or ranges (1-16, 33, 40-42) and press Enter to select them");
+    rangeEditor->onReturnKey = [this] { applyRangeText(); };
+    rangeEditor->onEscapeKey = [this] { updateRangeText (true); };
+    addAndMakeVisible (rangeEditor.get());
+    rangeSelectButton = std::make_unique<ColourButton> ("Select", FontOptions (13.0f));
+    rangeSelectButton->setTooltip ("Select the LEDs typed in the box");
+    rangeSelectButton->addListener (this);
+    addAndMakeVisible (rangeSelectButton.get());
+    allLedsButton = std::make_unique<ColourButton> ("All", FontOptions (13.0f));
+    allLedsButton->addListener (this);
+    addAndMakeVisible (allLedsButton.get());
+    noLedsButton = std::make_unique<ColourButton> ("None", FontOptions (13.0f));
+    noLedsButton->addListener (this);
+    addAndMakeVisible (noLedsButton.get());
+    selectionHint = std::make_unique<Label> ("Selection Hint");
+    selectionHint->setFont (FontOptions (12.0f));
+    addAndMakeVisible (selectionHint.get());
 
     //pulse mode settings
     pulseHeader = std::make_unique<Label> ("Pulse Header", "Pulse output");
@@ -315,26 +347,27 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
     addAndMakeVisible (edgeSelectBox.get());
 
     pulseHelp = std::make_unique<Label> ("Pulse Help",
-                                         "Tick the LEDs on the probe that should pulse, then click Upload pulse settings. "
+                                         "Select the LEDs that should pulse on the probe, then click Upload pulse settings. "
                                          "Start Stim (or the TTL trigger) plays it.");
     pulseHelp->setJustificationType (Justification::topLeft);
     addAndMakeVisible (pulseHelp.get());
 
     pulsePreview = std::make_unique<PatternEditor::WaveformPreview>();
-    pulsePreview->setWhole (true);
     addAndMakeVisible (pulsePreview.get());
-
-    //Initialize the led toggle buttons
-    for (int i = 0; i < 64; ++i)
+    pulseCycleButton = std::make_unique<PatternEditor::EditorButton> ("One cycle");
+    pulseWholeButton = std::make_unique<PatternEditor::EditorButton> ("Whole");
+    pulseCycleButton->onClick = [this]
     {
-        toggleButtons[i] = std::make_unique<ToggleButton> ("");
-        toggleButtons[i]->setClickingTogglesState (true);
-        toggleButtons[i]->setTriggeredOnMouseDown (true);
-        toggleButtons[i]->setWantsKeyboardFocus (false);
-
-        toggleButtons[i]->addListener (this);
-        addAndMakeVisible (toggleButtons[i].get());
-    }
+        pulsePreview->setWhole (false);
+        updatePulsePreview();
+    };
+    pulseWholeButton->onClick = [this]
+    {
+        pulsePreview->setWhole (true);
+        updatePulsePreview();
+    };
+    addAndMakeVisible (pulseCycleButton.get());
+    addAndMakeVisible (pulseWholeButton.get());
 
     //pattern mode
     patternDoc = std::make_unique<PatternEditor::PatternDocument>();
@@ -342,7 +375,6 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
     patternDoc->addChangeListener (this);
 
     patternPanel = std::make_unique<PatternEditor::PatternPanel> (*patternDoc);
-    patternPanel->onUploadBinFile = [this] (const File& f) { uploadPatternFile (f); };
     patternPanel->onPatternReplaced = [this]
     {
         // the probe on the headstage wins over the one saved in the design
@@ -350,8 +382,8 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
     };
     addChildComponent (patternPanel.get());
 
-    ledOverlay = std::make_unique<ProbeLedOverlay> (*this, *patternDoc);
-    addChildComponent (ledOverlay.get());
+    ledOverlay = std::make_unique<ProbeLedOverlay> (*this);
+    addAndMakeVisible (ledOverlay.get());
 
     //measures impedance (on acute configurations only).
     impedanceButton = std::make_unique<UtilityButton> ("Measure Impedances");
@@ -385,14 +417,10 @@ void ChannelList::lookAndFeelChanged()
     uploadStimParamButton->setColours (text, on);
     pulseModeButton->setColours (text, pattern ? off : on);
     patternModeButton->setColours (text, pattern ? on : off);
+    for (auto* b : { rangeSelectButton.get(), allLedsButton.get(), noLedsButton.get() })
+        b->setColours (text, off);
 
-    for (int i = 0; i < 64; ++i)
-    {
-        toggleButtons[i]->setColour (ToggleButton::ColourIds::tickDisabledColourId, Colours::darkgrey);
-        toggleButtons[i]->setColour (ToggleButton::ColourIds::tickColourId, ledColour());
-    }
-
-    for (auto* l : { triggerLabel.get(), pulseHeader.get(), pulseHelp.get() })
+    for (auto* l : { triggerLabel.get(), pulseHeader.get(), pulseHelp.get(), rangeLabel.get(), selectionHint.get() })
         l->setColour (Label::textColourId, Colours::black);
     for (auto* l : pulseLabels)
         l->setColour (Label::textColourId, Colours::black);
@@ -408,22 +436,23 @@ void ChannelList::setOutputMode (bool pattern)
 
     for (Component* c : { (Component*) pulseHeader.get(), (Component*) amplitudeInput.get(), (Component*) periodInput.get(),
                           (Component*) pulseWidthInput.get(), (Component*) edgeSelectBox.get(), (Component*) pulseCountInput.get(),
-                          (Component*) pulseHelp.get(), (Component*) pulsePreview.get() })
+                          (Component*) pulseHelp.get(), (Component*) pulsePreview.get(), (Component*) pulseCycleButton.get(),
+                          (Component*) pulseWholeButton.get() })
         c->setVisible (! pattern);
     for (auto* l : pulseLabels)
         l->setVisible (! pattern);
 
-    for (int i = 0; i < 64; ++i)
-        toggleButtons[i]->setVisible (! pattern && i < visibleLeds());
-
     patternPanel->setVisible (pattern);
-    ledOverlay->setVisible (pattern);
 
     uploadStimParamButton->setLabel (pattern ? "Upload pattern" : "Upload pulse settings");
     uploadStimParamButton->setTooltip (pattern ? "Write the pattern to the board (if it changed) and set the repeat count"
-                                               : "Send the pulse settings and ticked LEDs to the board");
+                                               : "Send the pulse settings and selected LEDs to the board");
+    selectionHint->setText (pattern ? "Click LEDs to select them, then apply a waveform. Blue = has a waveform."
+                                    : "Click LEDs to select the ones that pulse (blue).",
+                            dontSendNotification);
 
     lookAndFeelChanged();
+    updateRangeText (true);
     resized();
     repaint();
 }
@@ -444,6 +473,62 @@ Point<float> ChannelList::ledCentre (int index) const
     return { kProbeX + lane * (kShankW + kShankGap) + kShankW * 0.5f - 2.0f, yBottom - (j + 0.5f) * step };
 }
 
+std::set<int> ChannelList::ledSelection() const
+{
+    return selectedStimOutputType != 0 ? patternDoc->selectedLeds() : pulseLeds;
+}
+
+void ChannelList::setLedSelection (std::set<int> leds)
+{
+    // only LEDs on the drawn probe
+    for (auto it = leds.begin(); it != leds.end();)
+        it = (*it < 1 || *it > visibleLeds()) ? leds.erase (it) : std::next (it);
+
+    if (selectedStimOutputType != 0)
+    {
+        patternDoc->setSelectedBlocks ({});
+        patternDoc->setSelectedLeds (leds);
+    }
+    else
+    {
+        pulseLeds = leds;
+    }
+
+    updateRangeText (false);
+    ledOverlay->repaint();
+}
+
+bool ChannelList::ledHasWaveform (int led) const
+{
+    for (const auto& b : patternDoc->pattern().blocks)
+        if (b.led == led)
+            return true;
+    return false;
+}
+
+void ChannelList::updateRangeText (bool evenIfEditing)
+{
+    if (! evenIfEditing && rangeEditor->hasKeyboardFocus (true))
+        return;
+    rangeEditor->setText (formatLedRange (ledSelection()), false);
+    rangeEditor->setColour (TextEditor::outlineColourId, Colours::transparentBlack);
+}
+
+void ChannelList::applyRangeText()
+{
+    std::set<int> leds;
+    if (! parseLedRange (rangeEditor->getText(), visibleLeds(), leds))
+    {
+        rangeEditor->setColour (TextEditor::outlineColourId, Colours::red);
+        rangeEditor->repaint();
+        AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Select LEDs",
+                                          "Type LED numbers 1-" + String (visibleLeds()) + ", separated by commas, with a dash for ranges: e.g. 1-16, 33, 40-42");
+        return;
+    }
+    setLedSelection (leds);
+    updateRangeText (true);
+}
+
 void ChannelList::resized()
 {
     const int W = getWidth();
@@ -457,13 +542,15 @@ void ChannelList::resized()
     triggerSelectBox->setBounds (430, 10, 100, 26);
     uploadStimParamButton->setBounds (544, 10, 190, 26);
 
-    // LEDs on the probe drawing
-    for (int i = 0; i < 64; ++i)
-    {
-        const auto c = ledCentre (i);
-        toggleButtons[i]->setBounds ((int) std::round (c.x - 10.0f), (int) std::round (c.y - 10.0f), 20, 20);
-    }
-    ledOverlay->setBounds (0, 0, kProbeColumnW, H); // same coordinates as the drawing
+    // LEDs on the probe drawing, and the selection row under it
+    ledOverlay->setBounds (0, 0, kProbeColumnW, kSelectRowY - 4); // same coordinates as the drawing
+    rangeLabel->setBounds (6, kSelectRowY, 44, 26);
+    rangeEditor->setBounds (52, kSelectRowY, 200, 26);
+    rangeSelectButton->setBounds (258, kSelectRowY, 64, 26);
+    allLedsButton->setBounds (328, kSelectRowY, 54, 26);
+    noLedsButton->setBounds (388, kSelectRowY, 60, 26);
+    selectionHint->setBounds (10, kSelectRowY + 30, kProbeColumnW - 20, 18);
+    juce::ignoreUnused (H);
 
     // settings beside the probe
     const int x0 = kProbeColumnW + 10;
@@ -478,23 +565,37 @@ void ChannelList::resized()
         fields[i]->setBounds (x0 + 136, y, 90, 26);
     }
     const int previewX = x0 + 250;
-    pulsePreview->setBounds (previewX, kTopBarH + 42, jlimit (260, 520, W - previewX - 20), 154);
-    pulseHelp->setBounds (x0, kTopBarH + 42 + 5 * 32 + 6, jmin (700, W - x0 - 20), 40);
+    const int previewW = jlimit (260, 520, W - previewX - 20);
+    pulsePreview->setBounds (previewX, kTopBarH + 42, previewW, 154);
+    pulseCycleButton->setBounds (previewX, kTopBarH + 42 + 158, 90, 24);
+    pulseWholeButton->setBounds (previewX + 94, kTopBarH + 42 + 158, 70, 24);
+    pulseHelp->setBounds (x0, kTopBarH + 42 + 5 * 32 + 6, jmax (200, previewX - x0 - 10), 60);
 }
 
 void ChannelList::updatePulsePreview()
 {
+    // the board's pulse train: pulses of the width, one every period
+    const int periodMs = periodInput->getText().getIntValue();
+    const int widthMs = jmax (1, pulseWidthInput->getText().getIntValue());
+    const int count = jmax (1, pulseCountInput->getText().getIntValue());
+    const double period = jmax (widthMs, periodMs) / 1000.0;
+
     PatternGen::Block b;
     b.wave.kind = PatternGen::WaveKind::Shaped;
     auto& t = b.wave.shaped;
     t.shape = PatternGen::PulseShape::Square;
     t.amp = amplitudeInput->getText().getIntValue();
-    t.width = jmax (1, pulseWidthInput->getText().getIntValue()) / 1000.0;
-    t.count = jmax (1, pulseCountInput->getText().getIntValue());
-    const int periodMs = periodInput->getText().getIntValue();
-    t.rate = periodMs > 0 ? 1000.0 / periodMs : 1.0;
-    b.length = PatternGen::naturalLength (b.wave);
-    pulsePreview->setBlock (b);
+    t.width = widthMs / 1000.0;
+    t.count = count;
+    t.rate = 1.0 / period;
+
+    // one cycle = one period (pulse and the gap after it); whole = every pulse
+    const bool whole = pulsePreview->showsWhole();
+    b.length = whole ? count * period : period;
+    pulsePreview->setBlock (b, b.length, whole ? String ("All " + String (count) + (count == 1 ? " pulse" : " pulses")) : String ("One cycle"));
+
+    pulseCycleButton->setStyle (whole ? PatternEditor::EditorButton::Style::Normal : PatternEditor::EditorButton::Style::Accent);
+    pulseWholeButton->setStyle (whole ? PatternEditor::EditorButton::Style::Accent : PatternEditor::EditorButton::Style::Normal);
 }
 
 void ChannelList::buttonClicked (Button* btn)
@@ -507,6 +608,24 @@ void ChannelList::buttonClicked (Button* btn)
     if (btn == patternModeButton.get())
     {
         setOutputMode (true);
+        return;
+    }
+    if (btn == rangeSelectButton.get())
+    {
+        applyRangeText();
+        return;
+    }
+    if (btn == allLedsButton.get())
+    {
+        std::set<int> all;
+        for (int i = 1; i <= visibleLeds(); ++i)
+            all.insert (i);
+        setLedSelection (all);
+        return;
+    }
+    if (btn == noLedsButton.get())
+    {
+        setLedSelection ({});
         return;
     }
 
@@ -536,27 +655,22 @@ void ChannelList::buttonClicked (Button* btn)
         edge_sel = edgeSelectBox->getComponentID().getIntValue();
         pulse_count = pulseCountInput->getTextValue().toString().getIntValue();
 
-        //check the enabled buttons for which LEDs to output to
+        //selected LEDs (drawing position i = LED i + 1) -> board channels
         int leds[64];
         for (int i = 0; i < 64; ++i)
-            leds[ledMapping[i]] = toggleButtons[i]->getToggleState() ? 1 : 0;
+            leds[ledMapping[i]] = pulseLeds.count (i + 1) > 0 ? 1 : 0;
 
         //trig source is 0 indexed on fpga
         board->uploadStimParameters (amplitude, period, pulse_width, edge_sel, pulse_count, (trig_source - 1), leds);
     }
 }
 
-String ChannelList::patternKey() const
-{
-    // what goes into flash: everything but the repeat count
-    PatternGen::Pattern p = patternDoc->pattern();
-    p.repeatCount = 1;
-    return String::fromUTF8 (PatternGen::toJson (p).c_str());
-}
-
 void ChannelList::changeListenerCallback (ChangeBroadcaster*)
 {
     updateBoardStatus();
+    if (selectedStimOutputType != 0)
+        updateRangeText (false);
+    ledOverlay->repaint();
 }
 
 void ChannelList::updateBoardStatus()
@@ -568,11 +682,9 @@ void ChannelList::updateBoardStatus()
 
     if (! board->foundInputSource())
         patternPanel->setBoardStatus ("No board connected", false);
-    else if (flashFileName.isNotEmpty())
-        patternPanel->setBoardStatus ("On the board: " + flashFileName, false);
-    else if (flashKey.isEmpty())
+    else if (flashVersion == 0)
         patternPanel->setBoardStatus ("Not uploaded yet", false);
-    else if (flashKey != patternKey())
+    else if (flashVersion != patternDoc->contentVersion())
         patternPanel->setBoardStatus ("Changed since the last upload", false);
     else if (flashRepeats != repeats)
         patternPanel->setBoardStatus ("Upload to apply the new repeat count", false);
@@ -588,24 +700,23 @@ void ChannelList::uploadPattern()
         return;
     }
 
-    const String key = patternKey();
+    const auto version = patternDoc->contentVersion();
     const int repeats = patternDoc->pattern().repeatCount;
 
     Component::SafePointer<ChannelList> safeThis (this);
-    auto ready = [safeThis, key, repeats]
+    auto ready = [safeThis, version, repeats]
     {
         if (safeThis == nullptr)
             return;
         safeThis->board->setStimOutputType (1);
         safeThis->board->setPatternStimRepeatCount (repeats - 1);
-        safeThis->flashKey = key;
-        safeThis->flashFileName.clear();
+        safeThis->flashVersion = version;
         safeThis->flashRepeats = repeats;
         safeThis->updateBoardStatus();
     };
 
     // flash already holds this pattern: only the repeat count changes
-    if (key == flashKey && flashFileName.isEmpty())
+    if (version == flashVersion)
     {
         ready();
         return;
@@ -630,24 +741,6 @@ void ChannelList::uploadPattern()
                                  });
 }
 
-void ChannelList::uploadPatternFile (const File& file)
-{
-    const int repeats = patternDoc->pattern().repeatCount;
-    Component::SafePointer<ChannelList> safeThis (this);
-
-    beginPatternUpload (file, [safeThis, repeats, name = file.getFileName()] (bool ok)
-                        {
-                            if (! ok || safeThis == nullptr)
-                                return;
-                            safeThis->board->setStimOutputType (1);
-                            safeThis->board->setPatternStimRepeatCount (repeats - 1);
-                            safeThis->flashKey.clear();
-                            safeThis->flashFileName = name;
-                            safeThis->flashRepeats = repeats;
-                            safeThis->updateBoardStatus();
-                        });
-}
-
 void ChannelList::beginPatternUpload (const File& file, std::function<void (bool)> afterUpload)
 {
     if (! board->foundInputSource())
@@ -657,12 +750,11 @@ void ChannelList::beginPatternUpload (const File& file, std::function<void (bool
     }
 
     const String fileName = file.getFileName();
-    const int64 fileSize = file.getSize();
 
     Component::SafePointer<ChannelList> safeThis (this);
 
     // Upload in the background (owned by the DeviceThread); the GUI stays usable.
-    const bool started = board->startPatternUpload (file, [safeThis, fileName, fileSize, afterUpload] (bool ok)
+    const bool started = board->startPatternUpload (file, [safeThis, fileName, afterUpload] (bool ok)
                                                     {
                                                         if (! ok)
                                                             AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Upload failed",
@@ -693,17 +785,11 @@ void ChannelList::beginPatternUpload (const File& file, std::function<void (bool
 void ChannelList::disableAll()
 {
     uploadStimParamButton->setEnabled (false);
-
-    for (int i = 0; i < 64; ++i)
-        toggleButtons[i]->setEnabled (false);
 }
 
 void ChannelList::enableAll()
 {
     uploadStimParamButton->setEnabled (! board->isPatternUploadRunning());
-
-    for (int i = 0; i < 64; ++i)
-        toggleButtons[i]->setEnabled (true);
 }
 
 void ChannelList::comboBoxChanged (ComboBox* b)
@@ -736,10 +822,7 @@ void ChannelList::comboBoxChanged (ComboBox* b)
             ledMapping[i] = mapping[i];
 
         patternDoc->setProbe ((PatternGen::ProbeMapping) jlimit (1, 4, probeGeometry));
-
-        for (int i = 0; i < 64; ++i)
-            toggleButtons[i]->setVisible (selectedStimOutputType == 0 && i < visibleLeds());
-
+        setLedSelection (ledSelection()); // drop LEDs no longer drawn
         update();
     }
 }
@@ -757,9 +840,6 @@ void ChannelList::update()
     staticLabels.clear();
     channelComponents.clear();
     uploadStimParamButton->setEnabled (! board->isPatternUploadRunning());
-
-    for (int i = 0; i < 64; ++i)
-        toggleButtons[i]->setEnabled (i < visibleLeds());
 
     updateBoardStatus();
     repaint();
@@ -999,7 +1079,7 @@ void ChannelList::paint (juce::Graphics& g)
     const int disclaimerX = 30;
     const int disclaimerW = juce::jmax (200, getWidth() - 60);
 
-    const int disclaimerY1 = (int) std::round (startY + shankH + 30.0f);
+    const int disclaimerY1 = kSelectRowY + 56;
     const int disclaimerY2 = disclaimerY1 + 20;
 
     g.setColour (juce::Colours::black);

@@ -163,7 +163,7 @@ void LedList::paint (Graphics& g)
     {
         g.setColour (findColour (ThemeColours::defaultText).withAlpha (0.7f));
         g.setFont (FontOptions (13.0f));
-        g.drawFittedText ("Click LEDs on the probe (Ctrl-click or drag for more), pick a waveform on the right, then Apply.",
+        g.drawFittedText ("Select LEDs on the probe (click them, or type a range under it), pick a waveform on the right, then Apply.",
                           list.getBounds().reduced (10), Justification::centredTop, 4);
     }
 }
@@ -186,7 +186,7 @@ PatternPanel::PatternPanel (PatternDocument& d) : doc (d), ledList (d), designer
 {
     setWantsKeyboardFocus (true);
 
-    fileButton.setTooltip ("New, open or save a pattern design (.json), export the pattern file (.bin), or upload an existing .bin");
+    fileButton.setTooltip ("New, open or save a pattern design (.json), load or export a pattern file (.bin)");
     fileButton.onClick = [this] { showFileMenu(); };
     undoButton.setTooltip ("Undo (Ctrl+Z)");
     redoButton.setTooltip ("Redo (Ctrl+Y)");
@@ -301,7 +301,7 @@ void PatternPanel::commitRepeats()
         refresh();
         return;
     }
-    doc.modify ([v] (Pattern& p) { p.repeatCount = v; });
+    doc.setRepeatCount (v);
 }
 
 void PatternPanel::paint (Graphics& g)
@@ -383,8 +383,8 @@ void PatternPanel::showFileMenu()
     menu.addItem (3, "Save design" + String (doc.file != File() ? " (" + doc.file.getFileName() + ")" : String()));
     menu.addItem (4, "Save design as...");
     menu.addSeparator();
+    menu.addItem (6, "Load a pattern file (.bin)...");
     menu.addItem (5, "Export pattern file (.bin)...");
-    menu.addItem (6, "Upload an existing pattern file (.bin)...", onUploadBinFile != nullptr);
 
     menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&fileButton),
                         [this] (int result)
@@ -396,7 +396,7 @@ void PatternPanel::showFileMenu()
                                 case 3: savePattern (false); break;
                                 case 4: savePattern (true); break;
                                 case 5: exportBin(); break;
-                                case 6: chooseBinToUpload(); break;
+                                case 6: loadBin(); break;
                                 default: break;
                             }
                         });
@@ -563,16 +563,46 @@ void PatternPanel::exportBin()
                    });
 }
 
-void PatternPanel::chooseBinToUpload()
+void PatternPanel::loadBin()
 {
-    chooser = std::make_unique<FileChooser> ("Upload a pattern file", File::getSpecialLocation (File::userDocumentsDirectory), "*.bin");
-    chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles,
-                          [this] (const FileChooser& fc)
-                          {
-                              const File f = fc.getResult();
-                              if (f.existsAsFile() && onUploadBinFile)
-                                  onUploadBinFile (f);
-                          });
+    confirmDiscard ([this]
+                    {
+                        chooser = std::make_unique<FileChooser> ("Load a pattern file", File::getSpecialLocation (File::userDocumentsDirectory), "*.bin");
+                        chooser->launchAsync (FileBrowserComponent::openMode | FileBrowserComponent::canSelectFiles,
+                                              [this] (const FileChooser& fc)
+                                              {
+                                                  const File f = fc.getResult();
+                                                  if (! f.existsAsFile())
+                                                      return;
+
+                                                  MemoryBlock data;
+                                                  if (! f.loadFileAsData (data))
+                                                  {
+                                                      AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Load pattern file", "Couldn't read " + f.getFullPathName());
+                                                      return;
+                                                  }
+
+                                                  const auto* bytes = static_cast<const std::uint8_t*> (data.getData());
+                                                  Pattern p;
+                                                  std::string error;
+                                                  if (! decodePatternFile (std::vector<std::uint8_t> (bytes, bytes + data.getSize()), doc.pattern().probe, p, error))
+                                                  {
+                                                      AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Load pattern file", String (error));
+                                                      return;
+                                                  }
+
+                                                  for (auto& b : p.blocks)
+                                                      b.label = f.getFileNameWithoutExtension().toStdString();
+                                                  p.repeatCount = doc.pattern().repeatCount;
+                                                  doc.reset (p, File());
+                                                  timeline.zoomToFit();
+                                                  if (onPatternReplaced)
+                                                      onPatternReplaced();
+
+                                                  if (p.blocks.empty())
+                                                      AlertWindow::showMessageBoxAsync (AlertWindow::InfoIcon, "Load pattern file", f.getFileName() + " has no current on any LED.");
+                                              });
+                    });
 }
 
 } // namespace PatternEditor

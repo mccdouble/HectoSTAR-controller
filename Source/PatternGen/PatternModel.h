@@ -184,6 +184,13 @@ bool fitsInFlash (const Pattern& pattern);
     parse. Does not check flash capacity (see validate). */
 bool renderPattern (const Pattern& pattern, PatternData& out, std::string& error);
 
+/** Reads a pattern file (.bin, as written by encodePatternFile or the
+    MATLAB tool) back into a design: one block of samples per LED that has
+    any current, from its first to its last non-zero sample. The probe
+    mapping must be the one the file was made for. Fails (setting error)
+    when the size is not whole 64-byte frames or exceeds the flash. */
+bool decodePatternFile (const std::vector<std::uint8_t>& bytes, ProbeMapping mapping, Pattern& pattern, std::string& error);
+
 /** Saves / loads a pattern design (.json). fromJson leaves pattern unchanged
     and sets error on failure. */
 std::string toJson (const Pattern& pattern);

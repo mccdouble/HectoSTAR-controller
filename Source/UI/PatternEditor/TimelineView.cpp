@@ -193,23 +193,9 @@ void TimelineView::paint (Graphics& g)
 
     if (leds.empty())
     {
-        // getting-started guide
-        const auto box = area.withSizeKeepingCentre (jmin (520, area.getWidth() - 40), 150).toFloat();
-        g.setColour (findColour (ThemeColours::widgetBackground));
-        g.fillRoundedRectangle (box, 6.0f);
-        g.setColour (findColour (ThemeColours::outline));
-        g.drawRoundedRectangle (box, 6.0f, 1.0f);
-
-        auto lines = box.reduced (20, 14).toNearestInt();
-        g.setColour (findColour (ThemeColours::defaultText));
-        g.setFont (FontOptions (15.0f, Font::bold));
-        g.drawText ("Build a pattern", lines.removeFromTop (26), Justification::centredLeft);
+        g.setColour (findColour (ThemeColours::defaultText).withAlpha (0.6f));
         g.setFont (FontOptions (13.0f));
-        for (const char* step : { "1.  Select LEDs on the probe map (left).",
-                                  "2.  Pick a pulse shape or preset above, and how the LEDs are timed.",
-                                  "3.  Click \"Add\", then set amplitude, width, count and rate below.",
-                                  "Or double-click a lane to add a single block." })
-            g.drawText (step, lines.removeFromTop (24), Justification::centredLeft);
+        g.drawText ("The pattern's LEDs will show here once a waveform is applied.", area.reduced (10, 4), Justification::centredLeft, true);
     }
 }
 

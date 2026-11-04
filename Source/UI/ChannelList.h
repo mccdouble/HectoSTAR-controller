@@ -26,8 +26,11 @@
 
 #include <VisualizerEditorHeaders.h>
 
+#include <set>
+
 namespace PatternEditor
 {
+class EditorButton;
 class PatternDocument;
 class PatternPanel;
 class WaveformPreview;
@@ -138,7 +141,23 @@ private:
     std::unique_ptr<TextEditor> pulseCountInput;
     std::unique_ptr<Label> pulseHelp;
     std::unique_ptr<::PatternEditor::WaveformPreview> pulsePreview;
+    std::unique_ptr<::PatternEditor::EditorButton> pulseCycleButton, pulseWholeButton;
     void updatePulsePreview();
+
+    //LEDs on the probe drawing, the same buttons in both modes. LED n is
+    //drawing position n - 1 (shank (n - 1) / 16, row (n - 1) % 16 from the tip).
+    std::set<int> pulseLeds; // pulse mode: the LEDs that pulse
+    std::unique_ptr<Label> rangeLabel;
+    std::unique_ptr<TextEditor> rangeEditor;
+    std::unique_ptr<ColourButton> rangeSelectButton, allLedsButton, noLedsButton;
+    std::unique_ptr<Label> selectionHint;
+
+    /** Selected LEDs of the current mode (pattern: shared with the pattern panel). */
+    std::set<int> ledSelection() const;
+    void setLedSelection (std::set<int> leds);
+    bool ledHasWaveform (int led) const;
+    void updateRangeText (bool evenIfEditing);
+    void applyRangeText();
 
     //pattern mode
     std::unique_ptr<::PatternEditor::PatternDocument> patternDoc;
@@ -146,16 +165,14 @@ private:
     class ProbeLedOverlay;
     std::unique_ptr<ProbeLedOverlay> ledOverlay;
 
-    // what the board's flash holds: this design (its key), or a .bin file
-    String flashKey;
-    String flashFileName;
+    // what the board's flash holds: the design's content version at the
+    // last upload (0 = nothing uploaded from here) and its repeat count
+    std::uint64_t flashVersion = 0;
     int flashRepeats = 0;
-    String patternKey() const;
     void updateBoardStatus();
     void changeListenerCallback (ChangeBroadcaster*) override;
 
     void uploadPattern();
-    void uploadPatternFile (const File& file);
 
     //non-modal progress window shown while a pattern file uploads
     class PatternUploadWindow;
@@ -169,10 +186,6 @@ private:
     int visibleLeds() const;
 
     int enabledLEDS[64];
-
-    //galvani 3 LED Channel Toggle Buttons, Depends on the probe
-    //geometry UPDATE THIS
-    std::unique_ptr<ToggleButton> toggleButtons[64];
 
     //**G3 LED Channel Mapping array
     //default

@@ -68,9 +68,6 @@ public:
     /** Shown at the right of the header, e.g. "On the board: this pattern". */
     void setBoardStatus (const String& text, bool upToDate);
 
-    /** File menu "Upload a pattern file (.bin)...". */
-    std::function<void (const File&)> onUploadBinFile;
-
     /** Called after a design is opened or a new one started. */
     std::function<void()> onPatternReplaced;
 
@@ -100,7 +97,7 @@ private:
     void openPattern();
     void savePattern (bool askForFile);
     void exportBin();
-    void chooseBinToUpload();
+    void loadBin();
     void confirmDiscard (std::function<void()> then);
 };
 

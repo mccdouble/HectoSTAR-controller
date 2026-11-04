@@ -178,7 +178,10 @@ left, the settings of the output mode on the right.
   board's output type), the shared trigger, and one Upload button.
 - Pulse mode: the existing pulse settings as a form, a preview of the pulse
   train, and the LED tick boxes on the probe.
-- Pattern mode: click LEDs on the probe (Ctrl-click / drag for more); the
+- LEDs: the same numbered buttons on the probe in both modes; click to
+  toggle, or type a range ("1-16, 33") under the probe, as in
+  PatternGenGUI.m. Pulse mode: the selected LEDs pulse.
+- Pattern mode: select LEDs on the probe; the
   panel shows the LED list (one row per LED in the pattern, with a summary),
   the waveform designer (shape tiles in three tabs, parameters, one-cycle /
   whole preview, timing, Apply / Add after / Remove), and a compact timeline
@@ -186,5 +189,6 @@ left, the settings of the output mode on the right.
 - Pattern length and repeats live only in the pattern panel; Upload writes
   flash only when the pattern changed since the last upload (otherwise it
   just sets the repeat count), and the header says what the board holds.
-- File menu: new / open / save design (.json), export .bin, upload an
-  existing .bin.
+- File menu: new / open / save design (.json), export .bin, and load an
+  existing .bin into the editor (one samples block per LED; uploading is
+  then the normal Upload).
