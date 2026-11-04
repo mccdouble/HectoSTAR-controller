@@ -2331,6 +2331,14 @@ int Rhd2000EvalBoardUsb3::trigWrite (const string& filename, int file_size, std:
 
     int remaining_size = file_size;
 
+    //Hold the USB lock for a short slice of chunks, then hand it to the acquisition
+    //thread. Releasing after every chunk made the upload wait on the acquisition
+    //thread's FIFO polling thousands of times; the FPGA buffers incoming data, so
+    //pausing reads for one slice loses nothing.
+    const auto lockSlice = std::chrono::milliseconds (20);
+    std::unique_lock<mutex> lockOk (okMutex, std::defer_lock);
+    auto sliceStart = std::chrono::steady_clock::now();
+
     int j = 0;
     for (int i = 0; i < num_chunks; i++)
     {
@@ -2346,32 +2354,40 @@ int Rhd2000EvalBoardUsb3::trigWrite (const string& filename, int file_size, std:
             return -1;
         }
 
-        //lock for one chunk only (a few ms) so the acquisition thread isn't starved
+        if (! lockOk.owns_lock())
         {
-            lock_guard<mutex> lockOk (okMutex);
+            lockOk.lock();
+            sliceStart = std::chrono::steady_clock::now();
+        }
 
-            dev->WriteToPipeIn (DATA_IN_PIPE, MAX_TRANSFER_SIZE, buf); //sends max transfer size worth of data to FPGA
+        dev->WriteToPipeIn (DATA_IN_PIPE, MAX_TRANSFER_SIZE, buf); //sends max transfer size worth of data to FPGA
 
-            dev->SetWireInValue (ADDR, j); //sets starting address
-            dev->SetWireInValue (LENGTH, (MAX_TRANSFER_SIZE / FLASH_PAGE_SIZE) - 1); //set number of pages being written (a 0 means 1 page to be written.)
-            dev->UpdateWireIns();
+        dev->SetWireInValue (ADDR, j); //sets starting address
+        dev->SetWireInValue (LENGTH, (MAX_TRANSFER_SIZE / FLASH_PAGE_SIZE) - 1); //set number of pages being written (a 0 means 1 page to be written.)
+        dev->UpdateWireIns();
+        dev->UpdateTriggerOuts();
+        dev->ActivateTriggerIn (CMD_TRIG, 5); //trigger programming
+
+        //page programming takes < 1ms per page
+        const auto start = std::chrono::steady_clock::now();
+        while (true)
+        {
             dev->UpdateTriggerOuts();
-            dev->ActivateTriggerIn (CMD_TRIG, 5); //trigger programming
+            if (dev->IsTriggered (FLASH_DONE, 0x0001))
+                break;
 
-            //page programming takes < 1ms per page
-            const auto start = std::chrono::steady_clock::now();
-            while (true)
+            if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds (100))
             {
-                dev->UpdateTriggerOuts();
-                if (dev->IsTriggered (FLASH_DONE, 0x0001))
-                    break;
-
-                if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds (100))
-                {
-                    printf ("\nError: Timeout in WritePatternfile -- Programming failed.\n");
-                    return -1;
-                }
+                printf ("\nError: Timeout in WritePatternfile -- Programming failed.\n");
+                return -1; //lockOk releases the USB lock
             }
+        }
+
+        //end of slice: let the acquisition thread read before taking the lock again
+        if (std::chrono::steady_clock::now() - sliceStart > lockSlice)
+        {
+            lockOk.unlock();
+            std::this_thread::sleep_for (std::chrono::milliseconds (1));
         }
 
         j += MAX_TRANSFER_SIZE / FLASH_PAGE_SIZE;
@@ -2381,10 +2397,10 @@ int Rhd2000EvalBoardUsb3::trigWrite (const string& filename, int file_size, std:
             progress ((double) (i + 1) / num_chunks);
     }
 
-    {
-        lock_guard<mutex> lockOk (okMutex);
-        patternLength = file_size; //public variable for ease of use currently.
-    }
+    if (! lockOk.owns_lock())
+        lockOk.lock();
+
+    patternLength = file_size; //public variable for ease of use currently.
 
     return 0;
 }
