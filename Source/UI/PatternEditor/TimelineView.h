@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "PatternDocument.h"
+#include "Playback.h"
 
 namespace PatternEditor
 {
@@ -31,6 +31,9 @@ public:
 
     /** Zooms so the whole pattern fits the width. */
     void zoomToFit();
+
+    /** Shows the playhead of this playback (and scrolls to follow it). */
+    void setPlayback (Playback* p);
 
     /** Called when a lane's name is clicked (toggles that LED's selection). */
     std::function<void (int led)> onLaneNameClicked;
@@ -52,6 +55,7 @@ public:
 
 private:
     PatternDocument& doc;
+    Playback* playback = nullptr;
     ScrollBar hScroll { false };
     ScrollBar vScroll { true };
 

@@ -102,6 +102,7 @@ constexpr int kTopBarH = 46;
 constexpr int kSelectRowY = (int) (kProbeY + kShankH + 12.0f);
 
 Colour ledColour() { return Colour (0xff4169e1); } // royal blue: has a waveform / will pulse
+Colour playColour() { return Colour (0xff4fc3ff); } // light blue: an LED lit during playback
 
 /** "1-4, 9, 17-20" for a set of LED numbers. */
 String formatLedRange (const std::set<int>& leds)
@@ -171,6 +172,8 @@ public:
         const auto sel = owner.ledSelection();
         const bool pattern = owner.selectedStimOutputType != 0;
         const Colour accent = findColour (ThemeColours::highlightedFill);
+        const auto& playback = owner.patternPanel->getPlayback();
+        const bool playing = pattern && playback.isActive();
 
         for (int i = 0; i < owner.visibleLeds(); ++i)
         {
@@ -184,6 +187,25 @@ public:
             {
                 g.setColour (accent);
                 g.fillEllipse (r.expanded (3.5f));
+            }
+
+            if (playing)
+            {
+                // light output: glow and brightness follow the current (0..100 uA)
+                const float lit = jlimit (0.0f, 1.0f, playback.level (led) / 100.0f);
+                if (lit > 0)
+                {
+                    g.setColour (playColour().withAlpha (0.35f * lit + 0.1f));
+                    g.fillEllipse (r.expanded (4.0f + 8.0f * lit));
+                }
+                g.setColour (Colour (0xff20242a).interpolatedWith (playColour(), lit > 0 ? 0.35f + 0.65f * lit : 0.0f));
+                g.fillEllipse (r);
+                g.setColour (Colours::black.withAlpha (0.8f));
+                g.drawEllipse (r, 1.2f);
+                g.setColour (lit > 0.5f ? Colours::black : Colours::white.withAlpha (0.8f));
+                g.setFont (FontOptions (10.0f, Font::bold));
+                g.drawText (String (led), r.toNearestInt(), Justification::centred);
+                continue;
             }
 
             g.setColour (blue ? ledColour() : Colours::white.withAlpha (isEnabled() ? 0.45f : 0.2f));
@@ -239,6 +261,8 @@ private:
 
 ChannelList::~ChannelList()
 {
+    if (patternPanel != nullptr)
+        patternPanel->getPlayback().removeChangeListener (this);
     if (patternDoc != nullptr)
         patternDoc->removeChangeListener (this);
 }
@@ -384,6 +408,7 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
 
     ledOverlay = std::make_unique<ProbeLedOverlay> (*this);
     addAndMakeVisible (ledOverlay.get());
+    patternPanel->getPlayback().addChangeListener (this);
 
     //measures impedance (on acute configurations only).
     impedanceButton = std::make_unique<UtilityButton> ("Measure Impedances");
@@ -443,6 +468,8 @@ void ChannelList::setOutputMode (bool pattern)
         l->setVisible (! pattern);
 
     patternPanel->setVisible (pattern);
+    if (! pattern)
+        patternPanel->getPlayback().stop();
 
     uploadStimParamButton->setLabel (pattern ? "Upload pattern" : "Upload pulse settings");
     uploadStimParamButton->setTooltip (pattern ? "Write the pattern to the board (if it changed) and set the repeat count"
@@ -665,8 +692,14 @@ void ChannelList::buttonClicked (Button* btn)
     }
 }
 
-void ChannelList::changeListenerCallback (ChangeBroadcaster*)
+void ChannelList::changeListenerCallback (ChangeBroadcaster* source)
 {
+    if (source == &patternPanel->getPlayback())
+    {
+        ledOverlay->repaint();
+        return;
+    }
+
     updateBoardStatus();
     if (selectedStimOutputType != 0)
         updateRangeText (false);

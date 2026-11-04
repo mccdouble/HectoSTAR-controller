@@ -193,6 +193,7 @@ public:
         setLookAndFeel (&owner.getLookAndFeel());
 
         auto* view = new TimelineView (doc);
+        view->setPlayback (&owner.getPlayback());
         view->onLaneNameClicked = [&doc] (int led)
         {
             doc.setSelectedBlocks ({});
@@ -219,8 +220,33 @@ public:
     TimelineView* timeline = nullptr;
 };
 
-PatternPanel::PatternPanel (PatternDocument& d) : doc (d), ledList (d), designer (d)
+PatternPanel::PatternPanel (PatternDocument& d) : doc (d), playback (d), ledList (d), designer (d)
 {
+    playButton.setTooltip ("Play the pattern on screen: the LEDs on the probe light up with their current (nothing is sent to the board)");
+    playButton.onClick = [this]
+    {
+        if (playback.isPlaying())
+            playback.pause();
+        else
+            playback.play();
+    };
+    stopButton.onClick = [this] { playback.stop(); };
+    speedBox.addItem ("Real time", 1);
+    speedBox.addItem ("1/2 speed", 2);
+    speedBox.addItem ("1/10 speed", 3);
+    speedBox.addItem ("1/100 speed", 4);
+    speedBox.setSelectedId (1, dontSendNotification);
+    speedBox.setTooltip ("Slow the playback down to see short pulses and their shapes");
+    speedBox.onChange = [this]
+    {
+        static const double speeds[] = { 1.0, 0.5, 0.1, 0.01 };
+        playback.setSpeed (speeds[jlimit (1, 4, speedBox.getSelectedId()) - 1]);
+    };
+    playTime.setFont (FontOptions (13.0f));
+    for (Component* c : { (Component*) &playButton, (Component*) &stopButton, (Component*) &speedBox, (Component*) &playTime })
+        addAndMakeVisible (c);
+    playback.addChangeListener (this);
+
     setWantsKeyboardFocus (true);
 
     fileButton.setTooltip ("New, open or save a pattern design (.json), load or export a pattern file (.bin)");
@@ -259,12 +285,31 @@ PatternPanel::PatternPanel (PatternDocument& d) : doc (d), ledList (d), designer
 
     doc.addChangeListener (this);
     refresh();
+    updatePlayControls();
 }
 
 PatternPanel::~PatternPanel()
 {
+    playback.removeChangeListener (this);
+    playback.stop();
     doc.removeChangeListener (this);
     timelineWindow.reset();
+}
+
+void PatternPanel::updatePlayControls()
+{
+    playButton.setLabel (playback.isPlaying() ? "Pause" : "Play");
+    playButton.setStyle (playback.isPlaying() ? EditorButton::Style::Accent : EditorButton::Style::Normal);
+    stopButton.setActive (playback.isActive());
+
+    String t;
+    if (playback.isActive())
+    {
+        t << String (playback.getTime(), 3) << " s";
+        if (doc.pattern().repeatCount > 1)
+            t << "  (run " << playback.getRun() << " of " << doc.pattern().repeatCount << ")";
+    }
+    playTime.setText (t, dontSendNotification);
 }
 
 void PatternPanel::showTimeline()
@@ -277,8 +322,14 @@ void PatternPanel::showTimeline()
         timelineWindow->timeline->zoomToFit();
 }
 
-void PatternPanel::changeListenerCallback (ChangeBroadcaster*)
+void PatternPanel::changeListenerCallback (ChangeBroadcaster* source)
 {
+    if (source == &playback)
+    {
+        updatePlayControls();
+        return;
+    }
+
     // blocks picked on the timeline select their LEDs (so the designer loads them)
     if (doc.selectedBlocks() != lastBlockSelection)
     {
@@ -308,8 +359,8 @@ void PatternPanel::refresh()
 
     const double maxSeconds = (double) kMaxSamples / kSampleRateHz;
     String usage;
-    usage << "plays " << formatSeconds (p.duration * p.repeatCount) << " in total.  Board memory: "
-          << formatSeconds (p.duration) << " of " << formatSeconds (maxSeconds);
+    usage << "Board memory: " << formatSeconds (p.duration) << " of " << formatSeconds (maxSeconds)
+          << "  (plays " << formatSeconds (p.duration * p.repeatCount) << ")";
     usageLabel.setText (usage, dontSendNotification);
     usageLabel.setColour (Label::textColourId, fitsInFlash (p) ? findColour (ThemeColours::defaultText) : Colours::red);
 
@@ -368,6 +419,14 @@ void PatternPanel::resized()
     header.removeFromLeft (4);
     timelineButton.setBounds (header.removeFromLeft (80));
     header.removeFromLeft (10);
+    playButton.setBounds (header.removeFromLeft (60));
+    header.removeFromLeft (4);
+    stopButton.setBounds (header.removeFromLeft (52));
+    header.removeFromLeft (4);
+    speedBox.setBounds (header.removeFromLeft (110));
+    header.removeFromLeft (6);
+    playTime.setBounds (header.removeFromLeft (doc.pattern().repeatCount > 1 ? 150 : 70));
+    header.removeFromLeft (6);
     lengthLabel.setBounds (header.removeFromLeft (textWidth (lengthLabel.getText()) + 10));
     lengthEditor.setBounds (header.removeFromLeft (56));
     header.removeFromLeft (6);

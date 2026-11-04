@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include "Playback.h"
 #include "TimelineView.h"
 #include "WaveformDesigner.h"
 
@@ -71,11 +72,20 @@ public:
     /** Called after a design is opened or a new one started. */
     std::function<void()> onPatternReplaced;
 
+    /** On-screen playback (the probe drawing lights its LEDs from it). */
+    Playback& getPlayback() { return playback; }
+
 private:
     PatternDocument& doc;
 
     EditorButton fileButton { "File" }, undoButton { "Undo" }, redoButton { "Redo" };
     EditorButton timelineButton { "Timeline" };
+
+    Playback playback;
+    EditorButton playButton { "Play" }, stopButton { "Stop" };
+    ComboBox speedBox;
+    Label playTime;
+    void updatePlayControls();
     Label lengthLabel { {}, "Pattern length (s)" }, repeatLabel { {}, "Repeats" };
     TextEditor lengthEditor, repeatEditor;
     Label usageLabel, boardLabel;

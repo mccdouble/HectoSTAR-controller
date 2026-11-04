@@ -49,11 +49,39 @@ TimelineView::TimelineView (PatternDocument& d) : doc (d)
 
 TimelineView::~TimelineView()
 {
+    setPlayback (nullptr);
     doc.removeChangeListener (this);
 }
 
-void TimelineView::changeListenerCallback (ChangeBroadcaster*)
+void TimelineView::setPlayback (Playback* p)
 {
+    if (playback != nullptr)
+        playback->removeChangeListener (this);
+    playback = p;
+    if (playback != nullptr)
+        playback->addChangeListener (this);
+}
+
+void TimelineView::changeListenerCallback (ChangeBroadcaster* source)
+{
+    if (source == playback && playback != nullptr)
+    {
+        // keep the playhead in view
+        if (playback->isActive())
+        {
+            const auto area = lanesArea();
+            const double visible = area.getWidth() / pxPerSec;
+            const double t = playback->getTime();
+            if (t < viewStart || t > viewStart + visible)
+            {
+                viewStart = jmax (0.0, t - visible * 0.05);
+                updateScrollBars();
+            }
+        }
+        repaint();
+        return;
+    }
+
     updateScrollBars();
     repaint();
 }
@@ -190,6 +218,16 @@ void TimelineView::paint (Graphics& g)
     }
 
     paintRuler (g, getLocalBounds().removeFromTop (kRulerHeight).withTrimmedLeft (kNameWidth).withTrimmedRight (kScrollSize));
+
+    if (playback != nullptr && playback->isActive())
+    {
+        const float x = xForTime (playback->getTime());
+        if (x >= area.getX() && x <= area.getRight())
+        {
+            g.setColour (findColour (ThemeColours::highlightedFill));
+            g.fillRect (juce::Rectangle<float> (x - 1.0f, 0.0f, 2.0f, (float) area.getBottom()));
+        }
+    }
 
     if (leds.empty())
     {
