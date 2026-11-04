@@ -24,161 +24,7 @@ String formatSeconds (double s)
     return t + " s";
 }
 
-String ledPlace (int led)
-{
-    const int row = rowFromBottom (led) + 1;
-    return "shank " + String (shankOf (led)) + ", " + String (row) + (row == 1 ? "st" : row == 2 ? "nd" : row == 3 ? "rd" : "th") + " from tip";
-}
-
 } // namespace
-
-//==============================================================================
-
-LedList::LedList (PatternDocument& d) : doc (d)
-{
-    header.setText ("LEDs in the pattern", dontSendNotification);
-    header.setFont (FontOptions (14.0f, Font::bold));
-    addAndMakeVisible (header);
-
-    list.setModel (this);
-    list.setMultipleSelectionEnabled (true);
-    list.setRowHeight (40);
-    list.setOutlineThickness (1);
-    addAndMakeVisible (list);
-
-    allButton.setTooltip ("Select every LED that has a waveform");
-    allButton.onClick = [this]
-    {
-        const auto used = activeLeds (doc.pattern());
-        doc.setSelectedBlocks ({});
-        doc.setSelectedLeds (std::set<int> (used.begin(), used.end()));
-    };
-    noneButton.onClick = [this]
-    {
-        doc.setSelectedBlocks ({});
-        doc.setSelectedLeds ({});
-    };
-    addAndMakeVisible (allButton);
-    addAndMakeVisible (noneButton);
-
-    doc.addChangeListener (this);
-    refresh();
-}
-
-LedList::~LedList()
-{
-    doc.removeChangeListener (this);
-    list.setModel (nullptr);
-}
-
-void LedList::changeListenerCallback (ChangeBroadcaster*)
-{
-    refresh();
-}
-
-void LedList::refresh()
-{
-    const ScopedValueSetter<bool> guard (updating, true);
-
-    rows = doc.laneLeds();
-    list.updateContent();
-
-    SparseSet<int> sel;
-    for (int i = 0; i < (int) rows.size(); ++i)
-        if (doc.selectedLeds().count (rows[(std::size_t) i]) > 0)
-            sel.addRange ({ i, i + 1 });
-    list.setSelectedRows (sel, dontSendNotification);
-    list.repaint();
-}
-
-void LedList::paintListBoxItem (int row, Graphics& g, int width, int height, bool selected)
-{
-    if (row < 0 || row >= (int) rows.size())
-        return;
-
-    const int led = rows[(std::size_t) row];
-    const Colour text = findColour (ThemeColours::defaultText);
-    const Colour accent = findColour (ThemeColours::highlightedFill);
-
-    if (selected)
-        g.fillAll (accent.withAlpha (0.3f));
-
-    std::vector<const Block*> blocks;
-    for (const auto& b : doc.pattern().blocks)
-        if (b.led == led)
-            blocks.push_back (&b);
-    std::sort (blocks.begin(), blocks.end(), [] (const Block* a, const Block* b) { return a->start < b->start; });
-
-    // dot: filled when the LED has a waveform
-    const juce::Rectangle<float> dot (8.0f, height / 2.0f - 6.0f, 12.0f, 12.0f);
-    g.setColour (blocks.empty() ? text.withAlpha (0.3f) : accent);
-    if (blocks.empty())
-        g.drawEllipse (dot, 1.5f);
-    else
-        g.fillEllipse (dot);
-
-    g.setColour (text);
-    g.setFont (FontOptions (13.0f, Font::bold));
-    g.drawText ("LED " + String (led), 28, 3, 70, 18, Justification::centredLeft);
-    g.setFont (FontOptions (12.0f));
-    g.setColour (text.withAlpha (0.7f));
-    g.drawText (ledPlace (led), 92, 3, width - 96, 18, Justification::centredLeft);
-
-    String summary;
-    if (blocks.empty())
-        summary = "no waveform yet";
-    else
-    {
-        summary = describeWave (*blocks.front());
-        const double startMs = blocks.front()->start * 1000.0;
-        if (startMs > 0)
-            summary << ", from " << String (startMs, 1).trimCharactersAtEnd ("0").trimCharactersAtEnd (".") << " ms";
-        if (blocks.size() > 1)
-            summary << " (+" << (int) blocks.size() - 1 << " more)";
-    }
-    g.setColour (text.withAlpha (blocks.empty() ? 0.5f : 0.9f));
-    g.drawText (summary, 28, 20, width - 32, 17, Justification::centredLeft, true);
-}
-
-void LedList::selectedRowsChanged (int)
-{
-    if (updating)
-        return;
-
-    std::set<int> leds;
-    for (int i = 0; i < list.getNumSelectedRows(); ++i)
-    {
-        const int r = list.getSelectedRow (i);
-        if (r >= 0 && r < (int) rows.size())
-            leds.insert (rows[(std::size_t) r]);
-    }
-
-    doc.setSelectedBlocks ({});
-    doc.setSelectedLeds (leds);
-}
-
-void LedList::paint (Graphics& g)
-{
-    if (rows.empty())
-    {
-        g.setColour (findColour (ThemeColours::defaultText).withAlpha (0.7f));
-        g.setFont (FontOptions (13.0f));
-        g.drawFittedText ("Select LEDs on the probe (click them, or type a range under it), pick a waveform on the right, then Apply.",
-                          list.getBounds().reduced (10), Justification::centredTop, 4);
-    }
-}
-
-void LedList::resized()
-{
-    auto b = getLocalBounds();
-    auto top = b.removeFromTop (26);
-    noneButton.setBounds (top.removeFromRight (56));
-    top.removeFromRight (4);
-    allButton.setBounds (top.removeFromRight (84));
-    header.setBounds (top);
-    b.removeFromTop (6);
-    list.setBounds (b);
-}
 
 //==============================================================================
 
@@ -224,9 +70,29 @@ TimelinePane::TimelinePane (PatternDocument& d, Playback& p) : doc (d), playback
     timeline.setPlayback (&playback);
     timeline.onLaneNameClicked = [this] (int led)
     {
+        // click: just this LED; Ctrl/Cmd-click: add or remove it
+        auto sel = doc.selectedLeds();
+        if (ModifierKeys::currentModifiers.isCommandDown())
+        {
+            if (sel.count (led) > 0)
+                sel.erase (led);
+            else
+                sel.insert (led);
+        }
+        else
+            sel = { led };
         doc.setSelectedBlocks ({});
-        doc.setSelectedLeds ({ led });
+        doc.setSelectedLeds (sel);
     };
+
+    inUseButton.setTooltip ("Select every LED that has a waveform");
+    inUseButton.onClick = [this]
+    {
+        const auto used = activeLeds (doc.pattern());
+        doc.setSelectedBlocks ({});
+        doc.setSelectedLeds (std::set<int> (used.begin(), used.end()));
+    };
+    addAndMakeVisible (inUseButton);
     addAndMakeVisible (timeline);
 
     playback.addChangeListener (this);
@@ -278,6 +144,8 @@ void TimelinePane::resized()
     auto bar = b.removeFromTop (kToolbarHeight).reduced (10, 4);
 
     dockButton.setBounds (bar.removeFromRight (80));
+    bar.removeFromRight (6);
+    inUseButton.setBounds (bar.removeFromRight (150));
     title.setBounds (bar.removeFromLeft (80));
     playButton.setBounds (bar.removeFromLeft (64));
     bar.removeFromLeft (4);
@@ -364,7 +232,7 @@ private:
     PatternPanel& owner;
 };
 
-PatternPanel::PatternPanel (PatternDocument& d) : doc (d), playback (d), ledList (d), designer (d), timelinePane (d, playback)
+PatternPanel::PatternPanel (PatternDocument& d) : doc (d), playback (d), designer (d), timelinePane (d, playback)
 {
     timelinePane.onDockToggle = [this]
     {
@@ -412,7 +280,6 @@ PatternPanel::PatternPanel (PatternDocument& d) : doc (d), playback (d), ledList
     addAndMakeVisible (lengthEditor);
     addAndMakeVisible (repeatEditor);
 
-    addAndMakeVisible (ledList);
     addAndMakeVisible (designer);
 
     doc.addChangeListener (this);
@@ -531,7 +398,6 @@ void PatternPanel::paint (Graphics& g)
     g.fillAll (findColour (ThemeColours::componentBackground));
     g.setColour (findColour (ThemeColours::outline));
     g.drawHorizontalLine (headerBottom, 0.0f, (float) getWidth());
-    g.drawVerticalLine (ledList.getRight() + 7, (float) ledList.getY(), (float) ledList.getBottom());
 }
 
 void PatternPanel::resized()
@@ -567,8 +433,6 @@ void PatternPanel::resized()
         b.removeFromBottom (4);
     }
 
-    ledList.setBounds (b.removeFromLeft (jlimit (200, 280, b.getWidth() / 4)));
-    b.removeFromLeft (14);
     designer.setBounds (b);
 }
 

@@ -6,8 +6,6 @@
 
     Header:   File menu, undo/redo, pattern length, repeats, flash use and
               what is on the board.
-    LED list: the LEDs in the pattern (plus any selected), one row each with
-              a summary of its waveform; selection is shared with the probe.
     Designer: choose and tune a waveform, apply it to the selected LEDs.
     Timeline: the whole pattern, one lane per LED in use, for checking and
               fine timing (drag blocks to move them), with the on-screen playback
@@ -26,33 +24,6 @@
 
 namespace PatternEditor
 {
-
-/** List of the LEDs in the pattern; selecting rows selects LEDs. */
-class LedList : public Component,
-                private ListBoxModel,
-                private ChangeListener
-{
-public:
-    explicit LedList (PatternDocument& doc);
-    ~LedList() override;
-
-    void paint (Graphics& g) override;
-    void resized() override;
-
-private:
-    PatternDocument& doc;
-    Label header;
-    ListBox list;
-    EditorButton allButton { "All in use" }, noneButton { "None" };
-    std::vector<int> rows;
-    bool updating = false;
-
-    int getNumRows() override { return (int) rows.size(); }
-    void paintListBoxItem (int row, Graphics& g, int width, int height, bool selected) override;
-    void selectedRowsChanged (int lastRowSelected) override;
-    void changeListenerCallback (ChangeBroadcaster*) override;
-    void refresh();
-};
 
 /** The timeline with its playback toolbar (Play/Pause, Stop, speed, time)
     and the dock / pop-out button. Lives in the pattern panel or in its own
@@ -85,6 +56,7 @@ private:
     ComboBox speedBox;
     Label playTime;
     EditorButton dockButton { "Pop out" };
+    EditorButton inUseButton { "Select LEDs in use" };
     TimelineView timeline;
 
     void changeListenerCallback (ChangeBroadcaster*) override { updatePlayControls(); }
@@ -125,7 +97,6 @@ private:
     TextEditor lengthEditor, repeatEditor;
     Label usageLabel, boardLabel;
 
-    LedList ledList;
     WaveformDesigner designer;
 
     // the whole pattern over time: docked at the bottom, or in its own window

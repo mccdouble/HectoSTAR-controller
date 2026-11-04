@@ -22,6 +22,7 @@ namespace PatternEditor
 {
 
 class TimelineView : public Component,
+                     public TooltipClient,
                      private ChangeListener,
                      private ScrollBar::Listener
 {
@@ -39,6 +40,9 @@ public:
     std::function<void (int led)> onLaneNameClicked;
 
     void paint (Graphics& g) override;
+
+    /** Over a lane label: everything that LED plays (start, length, waveform). */
+    String getTooltip() override;
     void resized() override;
     void mouseDown (const MouseEvent& e) override;
     void mouseDrag (const MouseEvent& e) override;
@@ -50,7 +54,7 @@ public:
 
     static constexpr int kRulerHeight = 24;
     static constexpr int kLaneHeight = 44;
-    static constexpr int kNameWidth = 112;
+    static constexpr int kNameWidth = 230;
     static constexpr int kScrollSize = 12;
 
 private:
@@ -60,6 +64,7 @@ private:
     ScrollBar vScroll { true };
 
     double pxPerSec = 600.0;
+    Point<int> hoverPos;
     double viewStart = 0.0;
     double scrollY = 0.0;
     bool fittedOnce = false;

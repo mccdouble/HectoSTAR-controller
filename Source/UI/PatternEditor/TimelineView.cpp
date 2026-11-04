@@ -9,10 +9,41 @@
 #include "TimelineView.h"
 #include "WaveformCatalog.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace PatternEditor
 {
+
+namespace
+{
+
+String ledPlace (int led)
+{
+    const int row = rowFromBottom (led) + 1;
+    return "shank " + String (shankOf (led)) + ", " + String (row) + (row == 1 ? "st" : row == 2 ? "nd" : row == 3 ? "rd" : "th") + " from tip";
+}
+
+std::vector<const Block*> blocksOn (const Pattern& p, int led)
+{
+    std::vector<const Block*> out;
+    for (const auto& b : p.blocks)
+        if (b.led == led)
+            out.push_back (&b);
+    std::sort (out.begin(), out.end(), [] (const Block* a, const Block* b) { return a->start < b->start; });
+    return out;
+}
+
+String msText (double s)
+{
+    String t (s * 1000.0, 1);
+    if (t.containsChar ('.'))
+        t = t.trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
+    return t + " ms";
+}
+
+} // namespace
+
 
 namespace
 {
@@ -233,7 +264,8 @@ void TimelineView::paint (Graphics& g)
     {
         g.setColour (findColour (ThemeColours::defaultText).withAlpha (0.6f));
         g.setFont (FontOptions (13.0f));
-        g.drawText ("The pattern's LEDs will show here once a waveform is applied.", area.reduced (10, 4), Justification::centredLeft, true);
+        g.drawText ("Select LEDs on the probe (click them, or type a range under it), choose a waveform above and click Apply. Each LED in the pattern gets a lane here.",
+                    area.reduced (10, 4), Justification::centredLeft, true);
     }
 }
 
@@ -279,12 +311,26 @@ void TimelineView::paintLane (Graphics& g, int index, int led)
 
     g.setColour (ledSelected ? accent.withAlpha (0.35f) : findColour (ThemeColours::widgetBackground));
     g.fillRect (name);
+    // label: LED and where it is, then what it plays (all of it in the tooltip)
+    const auto blocks = blocksOn (doc.pattern(), led);
+    auto rows = name.reduced (8, 3);
+    auto first = rows.removeFromTop (rows.getHeight() / 2);
     g.setColour (text);
     g.setFont (FontOptions (13.0f, Font::bold));
-    g.drawText ("CH " + String (led), name.reduced (6, 0).withTrimmedBottom (kLaneHeight / 2), Justification::bottomLeft);
+    g.drawText ("LED " + String (led), first.removeFromLeft (58), Justification::centredLeft);
     g.setFont (FontOptions (11.0f));
     g.setColour (text.withAlpha (0.7f));
-    g.drawText ("S" + String (shankOf (led)) + " row " + String (rowFromBottom (led) + 1), name.reduced (6, 0).withTrimmedTop (kLaneHeight / 2), Justification::topLeft);
+    g.drawText (ledPlace (led), first, Justification::centredLeft, true);
+
+    String summary = "no waveform yet";
+    if (! blocks.empty())
+    {
+        summary = describeWave (*blocks.front());
+        if (blocks.size() > 1)
+            summary = "+" + String ((int) blocks.size() - 1) + " more: " + summary;
+    }
+    g.setColour (text.withAlpha (blocks.empty() ? 0.5f : 0.9f));
+    g.drawText (summary, rows, Justification::centredLeft, true);
 
     g.setColour (findColour (ThemeColours::outline).withAlpha (0.6f));
     g.drawHorizontalLine (top + kLaneHeight - 1, 0.0f, (float) lane.getRight());
@@ -381,8 +427,26 @@ TimelineView::Hit TimelineView::hitTest (Point<float> p) const
     return hit;
 }
 
+String TimelineView::getTooltip()
+{
+    const int index = laneIndexAt (hoverPos.y);
+    const auto leds = doc.laneLeds();
+    if (index < 0 || index >= (int) leds.size() || hoverPos.x >= kNameWidth)
+        return {};
+
+    const int led = leds[(std::size_t) index];
+    String tip = "LED " + String (led) + " (" + ledPlace (led) + "). Click to select it, Ctrl-click to add or remove it.";
+    const auto blocks = blocksOn (doc.pattern(), led);
+    if (blocks.empty())
+        tip << "\nNo waveform yet.";
+    for (const Block* b : blocks)
+        tip << "\n" << msText (b->start) << " to " << msText (b->start + b->length) << ":  " << describeWave (*b);
+    return tip;
+}
+
 void TimelineView::mouseMove (const MouseEvent& e)
 {
+    hoverPos = e.getPosition();
     const auto hit = hitTest (e.position);
     setMouseCursor (hit.mode == Drag::ResizeEnd || hit.mode == Drag::ResizeStart ? MouseCursor::LeftRightResizeCursor
                                                                                  : MouseCursor::NormalCursor);

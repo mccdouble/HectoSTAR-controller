@@ -181,11 +181,13 @@ left, the settings of the output mode on the right.
 - LEDs: the same numbered buttons on the probe in both modes; click to
   toggle, or type a range ("1-16, 33") under the probe, as in
   PatternGenGUI.m. Pulse mode: the selected LEDs pulse.
-- Pattern mode: select LEDs on the probe; the
-  panel shows the LED list (one row per LED in the pattern, with a summary),
-  the waveform designer (shape tiles in three tabs, parameters, one-cycle /
-  whole preview, timing, Apply / Add after / Remove), and a compact timeline
-  of the LEDs in use. Apply works like the MATLAB tool's bulk update.
+- Pattern mode: select LEDs on the probe; the panel shows the waveform
+  designer (shape tiles in three tabs, parameters, one-cycle / whole
+  preview, timing, Apply / Add after / Remove) above the timeline of the LEDs
+  in use. Each lane label names the LED, where it sits and a summary of its
+  waveform; its tooltip lists everything the LED plays. (An earlier LED list
+  panel repeated this and was removed.) Apply works like the MATLAB tool's
+  bulk update.
 - Pattern length and repeats live only in the pattern panel; Upload writes
   flash only when the pattern changed since the last upload (otherwise it
   just sets the repeat count), and the header says what the board holds.
