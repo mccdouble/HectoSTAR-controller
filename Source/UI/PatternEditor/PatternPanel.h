@@ -10,7 +10,10 @@
               a summary of its waveform; selection is shared with the probe.
     Designer: choose and tune a waveform, apply it to the selected LEDs.
     Timeline: the whole pattern, one lane per LED in use, for checking and
-              fine timing (drag blocks to move them).
+              fine timing (drag blocks to move them), with the on-screen playback
+              controls. Docked along the bottom (drag the bar above it to resize);
+              Pop out moves it to its own window, Dock (or closing that window)
+              brings it back.
 
     ------------------------------------------------------------------
 */
@@ -51,6 +54,43 @@ private:
     void refresh();
 };
 
+/** The timeline with its playback toolbar (Play/Pause, Stop, speed, time)
+    and the dock / pop-out button. Lives in the pattern panel or in its own
+    window. */
+class TimelinePane : public Component,
+                     private ChangeListener
+{
+public:
+    TimelinePane (PatternDocument& doc, Playback& playback);
+    ~TimelinePane() override;
+
+    TimelineView& getTimeline() { return timeline; }
+
+    /** Shows "Pop out" when docked, "Dock" when in its own window. */
+    void setDocked (bool docked);
+
+    std::function<void()> onDockToggle;
+
+    void paint (Graphics& g) override;
+    void resized() override;
+
+    static constexpr int kToolbarHeight = 34;
+
+private:
+    PatternDocument& doc;
+    Playback& playback;
+
+    Label title { {}, "Timeline" };
+    EditorButton playButton { "Play" }, stopButton { "Stop" };
+    ComboBox speedBox;
+    Label playTime;
+    EditorButton dockButton { "Pop out" };
+    TimelineView timeline;
+
+    void changeListenerCallback (ChangeBroadcaster*) override { updatePlayControls(); }
+    void updatePlayControls();
+};
+
 class PatternPanel : public Component,
                      private ChangeListener
 {
@@ -79,13 +119,8 @@ private:
     PatternDocument& doc;
 
     EditorButton fileButton { "File" }, undoButton { "Undo" }, redoButton { "Redo" };
-    EditorButton timelineButton { "Timeline" };
 
     Playback playback;
-    EditorButton playButton { "Play" }, stopButton { "Stop" };
-    ComboBox speedBox;
-    Label playTime;
-    void updatePlayControls();
     Label lengthLabel { {}, "Pattern length (s)" }, repeatLabel { {}, "Repeats" };
     TextEditor lengthEditor, repeatEditor;
     Label usageLabel, boardLabel;
@@ -93,10 +128,15 @@ private:
     LedList ledList;
     WaveformDesigner designer;
 
-    // the whole pattern over time, in its own window
+    // the whole pattern over time: docked at the bottom, or in its own window
+    TimelinePane timelinePane;
+    bool timelineDocked = true;
+    int timelineHeight = 260;
+    class Divider;
+    std::unique_ptr<Divider> divider;
     class TimelineWindow;
     std::unique_ptr<TimelineWindow> timelineWindow;
-    void showTimeline();
+    void setTimelineDocked (bool docked);
 
     std::unique_ptr<FileChooser> chooser;
     std::set<int> lastBlockSelection;

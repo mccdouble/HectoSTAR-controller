@@ -182,46 +182,11 @@ void LedList::resized()
 
 //==============================================================================
 
-/** The pattern's timeline (one lane per LED in use) in a window of its own,
-    so the stim panel stays uncluttered. Closing it only hides it. */
-class PatternPanel::TimelineWindow : public DocumentWindow
+TimelinePane::TimelinePane (PatternDocument& d, Playback& p) : doc (d), playback (p), timeline (d)
 {
-public:
-    TimelineWindow (PatternPanel& owner, PatternDocument& doc)
-        : DocumentWindow ("HectoSTAR pattern timeline", owner.findColour (ThemeColours::componentBackground), DocumentWindow::allButtons)
-    {
-        setLookAndFeel (&owner.getLookAndFeel());
+    title.setFont (FontOptions (14.0f, Font::bold));
+    addAndMakeVisible (title);
 
-        auto* view = new TimelineView (doc);
-        view->setPlayback (&owner.getPlayback());
-        view->onLaneNameClicked = [&doc] (int led)
-        {
-            doc.setSelectedBlocks ({});
-            doc.setSelectedLeds ({ led });
-        };
-        timeline = view;
-        setContentOwned (view, false);
-        setUsingNativeTitleBar (true);
-        setResizable (true, false);
-        setResizeLimits (500, 200, 10000, 10000);
-
-        auto area = owner.getScreenBounds();
-        setBounds (area.getX(), area.getBottom() - 360, jmax (900, area.getWidth()), 360);
-    }
-
-    ~TimelineWindow() override
-    {
-        clearContentComponent();
-        setLookAndFeel (nullptr);
-    }
-
-    void closeButtonPressed() override { setVisible (false); }
-
-    TimelineView* timeline = nullptr;
-};
-
-PatternPanel::PatternPanel (PatternDocument& d) : doc (d), playback (d), ledList (d), designer (d)
-{
     playButton.setTooltip ("Play the pattern on screen: the LEDs on the probe light up with their current (nothing is sent to the board)");
     playButton.onClick = [this]
     {
@@ -231,6 +196,7 @@ PatternPanel::PatternPanel (PatternDocument& d) : doc (d), playback (d), ledList
             playback.play();
     };
     stopButton.onClick = [this] { playback.stop(); };
+
     speedBox.addItem ("Real time", 1);
     speedBox.addItem ("1/2 speed", 2);
     speedBox.addItem ("1/10 speed", 3);
@@ -242,10 +208,178 @@ PatternPanel::PatternPanel (PatternDocument& d) : doc (d), playback (d), ledList
         static const double speeds[] = { 1.0, 0.5, 0.1, 0.01 };
         playback.setSpeed (speeds[jlimit (1, 4, speedBox.getSelectedId()) - 1]);
     };
+
     playTime.setFont (FontOptions (13.0f));
-    for (Component* c : { (Component*) &playButton, (Component*) &stopButton, (Component*) &speedBox, (Component*) &playTime })
+
+    dockButton.setTooltip ("Move the timeline to its own window, or back into the stim panel");
+    dockButton.onClick = [this]
+    {
+        if (onDockToggle)
+            onDockToggle();
+    };
+
+    for (Component* c : { (Component*) &playButton, (Component*) &stopButton, (Component*) &speedBox, (Component*) &playTime, (Component*) &dockButton })
         addAndMakeVisible (c);
+
+    timeline.setPlayback (&playback);
+    timeline.onLaneNameClicked = [this] (int led)
+    {
+        doc.setSelectedBlocks ({});
+        doc.setSelectedLeds ({ led });
+    };
+    addAndMakeVisible (timeline);
+
     playback.addChangeListener (this);
+    doc.addChangeListener (this);
+    updatePlayControls();
+}
+
+TimelinePane::~TimelinePane()
+{
+    doc.removeChangeListener (this);
+    playback.removeChangeListener (this);
+    timeline.setPlayback (nullptr);
+}
+
+void TimelinePane::setDocked (bool docked)
+{
+    dockButton.setLabel (docked ? "Pop out" : "Dock");
+    dockButton.repaint();
+}
+
+void TimelinePane::updatePlayControls()
+{
+    playButton.setLabel (playback.isPlaying() ? "Pause" : "Play");
+    playButton.setStyle (playback.isPlaying() ? EditorButton::Style::Accent : EditorButton::Style::Normal);
+    stopButton.setActive (playback.isActive());
+
+    String t;
+    if (playback.isActive())
+    {
+        t << String (playback.getTime(), 3) << " s";
+        if (doc.pattern().repeatCount > 1)
+            t << "   run " << playback.getRun() << " of " << doc.pattern().repeatCount;
+    }
+    playTime.setText (t, dontSendNotification);
+}
+
+void TimelinePane::paint (Graphics& g)
+{
+    g.fillAll (findColour (ThemeColours::componentBackground));
+    g.setColour (findColour (ThemeColours::widgetBackground));
+    g.fillRect (0, 0, getWidth(), kToolbarHeight);
+    g.setColour (findColour (ThemeColours::outline));
+    g.drawHorizontalLine (kToolbarHeight - 1, 0.0f, (float) getWidth());
+}
+
+void TimelinePane::resized()
+{
+    auto b = getLocalBounds();
+    auto bar = b.removeFromTop (kToolbarHeight).reduced (10, 4);
+
+    dockButton.setBounds (bar.removeFromRight (80));
+    title.setBounds (bar.removeFromLeft (80));
+    playButton.setBounds (bar.removeFromLeft (64));
+    bar.removeFromLeft (4);
+    stopButton.setBounds (bar.removeFromLeft (56));
+    bar.removeFromLeft (8);
+    speedBox.setBounds (bar.removeFromLeft (120));
+    bar.removeFromLeft (10);
+    playTime.setBounds (bar);
+
+    timeline.setBounds (b);
+}
+
+//==============================================================================
+
+/** The bar above the docked timeline: drag it to resize the timeline. */
+class PatternPanel::Divider : public Component,
+                              public SettableTooltipClient
+{
+public:
+    explicit Divider (PatternPanel& o) : owner (o)
+    {
+        setMouseCursor (MouseCursor::UpDownResizeCursor);
+        setTooltip ("Drag to resize the timeline");
+    }
+
+    void paint (Graphics& g) override
+    {
+        g.setColour (findColour (ThemeColours::outline));
+        const float y = getHeight() * 0.5f;
+        g.drawHorizontalLine ((int) y, 0.0f, (float) getWidth());
+        for (int i = -1; i <= 1; ++i)
+            g.fillEllipse (getWidth() * 0.5f + i * 8.0f - 1.5f, y - 1.5f, 3.0f, 3.0f);
+    }
+
+    void mouseDown (const MouseEvent&) override { startHeight = owner.timelineHeight; }
+
+    void mouseDrag (const MouseEvent& e) override
+    {
+        owner.timelineHeight = startHeight - e.getDistanceFromDragStartY();
+        owner.resized();
+        owner.repaint();
+    }
+
+private:
+    PatternPanel& owner;
+    int startHeight = 0;
+};
+
+/** The timeline in a window of its own. Closing the window docks it again. */
+class PatternPanel::TimelineWindow : public DocumentWindow
+{
+public:
+    TimelineWindow (PatternPanel& o, TimelinePane& pane)
+        : DocumentWindow ("HectoSTAR pattern timeline", o.findColour (ThemeColours::componentBackground), DocumentWindow::allButtons),
+          owner (o)
+    {
+        setLookAndFeel (&owner.getLookAndFeel());
+        setContentNonOwned (&pane, false);
+        setUsingNativeTitleBar (true);
+        setResizable (true, false);
+        setResizeLimits (500, 200, 10000, 10000);
+
+        auto area = owner.getScreenBounds();
+        setBounds (area.getX(), area.getBottom() - 380, jmax (900, area.getWidth()), 380);
+    }
+
+    ~TimelineWindow() override
+    {
+        clearContentComponent();
+        setLookAndFeel (nullptr);
+    }
+
+    void closeButtonPressed() override
+    {
+        Component::SafePointer<PatternPanel> safeOwner (&owner);
+        MessageManager::callAsync ([safeOwner]
+                                   {
+                                       if (safeOwner != nullptr)
+                                           safeOwner->setTimelineDocked (true);
+                                   });
+    }
+
+private:
+    PatternPanel& owner;
+};
+
+PatternPanel::PatternPanel (PatternDocument& d) : doc (d), playback (d), ledList (d), designer (d), timelinePane (d, playback)
+{
+    timelinePane.onDockToggle = [this]
+    {
+        // async: the click may come from inside the window that docking deletes
+        Component::SafePointer<PatternPanel> safeThis (this);
+        const bool dock = ! timelineDocked;
+        MessageManager::callAsync ([safeThis, dock]
+                                   {
+                                       if (safeThis != nullptr)
+                                           safeThis->setTimelineDocked (dock);
+                                   });
+    };
+    addAndMakeVisible (timelinePane);
+    divider = std::make_unique<Divider> (*this);
+    addAndMakeVisible (divider.get());
 
     setWantsKeyboardFocus (true);
 
@@ -255,9 +389,7 @@ PatternPanel::PatternPanel (PatternDocument& d) : doc (d), playback (d), ledList
     redoButton.setTooltip ("Redo (Ctrl+Y)");
     undoButton.onClick = [this] { doc.undo(); };
     redoButton.onClick = [this] { doc.redo(); };
-    timelineButton.setTooltip ("Open the pattern's timeline: every LED in use over time (drag blocks to fine-tune timing)");
-    timelineButton.onClick = [this] { showTimeline(); };
-    for (auto* b : { &fileButton, &undoButton, &redoButton, &timelineButton })
+    for (auto* b : { &fileButton, &undoButton, &redoButton })
         addAndMakeVisible (b);
 
     for (auto* l : { &lengthLabel, &repeatLabel, &usageLabel, &boardLabel })
@@ -285,51 +417,47 @@ PatternPanel::PatternPanel (PatternDocument& d) : doc (d), playback (d), ledList
 
     doc.addChangeListener (this);
     refresh();
-    updatePlayControls();
 }
 
 PatternPanel::~PatternPanel()
 {
-    playback.removeChangeListener (this);
     playback.stop();
     doc.removeChangeListener (this);
+    if (timelineWindow != nullptr)
+        timelineWindow->clearContentComponent();
     timelineWindow.reset();
 }
 
-void PatternPanel::updatePlayControls()
+void PatternPanel::setTimelineDocked (bool docked)
 {
-    playButton.setLabel (playback.isPlaying() ? "Pause" : "Play");
-    playButton.setStyle (playback.isPlaying() ? EditorButton::Style::Accent : EditorButton::Style::Normal);
-    stopButton.setActive (playback.isActive());
-
-    String t;
-    if (playback.isActive())
-    {
-        t << String (playback.getTime(), 3) << " s";
-        if (doc.pattern().repeatCount > 1)
-            t << "  (run " << playback.getRun() << " of " << doc.pattern().repeatCount << ")";
-    }
-    playTime.setText (t, dontSendNotification);
-}
-
-void PatternPanel::showTimeline()
-{
-    if (timelineWindow == nullptr)
-        timelineWindow = std::make_unique<TimelineWindow> (*this, doc);
-    timelineWindow->setVisible (true);
-    timelineWindow->toFront (true);
-    if (timelineWindow->timeline != nullptr)
-        timelineWindow->timeline->zoomToFit();
-}
-
-void PatternPanel::changeListenerCallback (ChangeBroadcaster* source)
-{
-    if (source == &playback)
-    {
-        updatePlayControls();
+    if (docked == timelineDocked)
         return;
+    timelineDocked = docked;
+
+    if (docked)
+    {
+        if (timelineWindow != nullptr)
+            timelineWindow->clearContentComponent();
+        timelineWindow.reset();
+        addAndMakeVisible (timelinePane);
+        divider->setVisible (true);
+    }
+    else
+    {
+        removeChildComponent (&timelinePane);
+        divider->setVisible (false);
+        timelineWindow = std::make_unique<TimelineWindow> (*this, timelinePane);
+        timelineWindow->setVisible (true);
+        timelineWindow->toFront (true);
     }
 
+    timelinePane.setDocked (docked);
+    resized();
+    repaint();
+}
+
+void PatternPanel::changeListenerCallback (ChangeBroadcaster*)
+{
     // blocks picked on the timeline select their LEDs (so the designer loads them)
     if (doc.selectedBlocks() != lastBlockSelection)
     {
@@ -417,16 +545,7 @@ void PatternPanel::resized()
     header.removeFromLeft (4);
     redoButton.setBounds (header.removeFromLeft (56));
     header.removeFromLeft (4);
-    timelineButton.setBounds (header.removeFromLeft (80));
-    header.removeFromLeft (10);
-    playButton.setBounds (header.removeFromLeft (60));
-    header.removeFromLeft (4);
-    stopButton.setBounds (header.removeFromLeft (52));
-    header.removeFromLeft (4);
-    speedBox.setBounds (header.removeFromLeft (110));
-    header.removeFromLeft (6);
-    playTime.setBounds (header.removeFromLeft (doc.pattern().repeatCount > 1 ? 150 : 70));
-    header.removeFromLeft (6);
+    header.removeFromLeft (14);
     lengthLabel.setBounds (header.removeFromLeft (textWidth (lengthLabel.getText()) + 10));
     lengthEditor.setBounds (header.removeFromLeft (56));
     header.removeFromLeft (6);
@@ -438,6 +557,15 @@ void PatternPanel::resized()
 
     headerBottom = b.getY() + 4;
     b.removeFromTop (12);
+
+    if (timelineDocked)
+    {
+        // keep at least 260 px for the waveform settings above it
+        timelineHeight = jlimit (140, jmax (140, b.getHeight() - 260), timelineHeight);
+        timelinePane.setBounds (b.removeFromBottom (timelineHeight).expanded (10, 0).withTrimmedBottom (-8));
+        divider->setBounds (b.removeFromBottom (10).expanded (10, 0));
+        b.removeFromBottom (4);
+    }
 
     ledList.setBounds (b.removeFromLeft (jlimit (200, 280, b.getWidth() / 4)));
     b.removeFromLeft (14);

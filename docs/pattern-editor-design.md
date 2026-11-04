@@ -192,3 +192,19 @@ left, the settings of the output mode on the right.
 - File menu: new / open / save design (.json), export .bin, and load an
   existing .bin into the editor (one samples block per LED; uploading is
   then the normal Upload).
+
+## Docked timeline and shape maths
+
+- The timeline is docked along the bottom of the pattern panel (drag the
+  bar above it to resize). Its toolbar holds the on-screen playback
+  (Play/Pause, Stop, speed, time and run) and Pop out, which moves the
+  timeline with its toolbar into its own window; Dock, or closing that
+  window, brings it back.
+- For a pulse-shape waveform the designer shows f(x) across the pulse, the
+  paper's name for the shape, how the train is built (pulse k starts at
+  k x period, amplitude + k x step) and the equal-charge factor 1/mean(f).
+- Edit as formula converts the train into a Custom formula
+  (`shapedTrainFormula`). It counts whole samples from the block start,
+  k = floor(t*fs + 1e-6), and samples x as the renderer does, so it
+  renders exactly the same bytes (model test: every shape, with steps,
+  equal charge, an odd width and an off-grid start).
