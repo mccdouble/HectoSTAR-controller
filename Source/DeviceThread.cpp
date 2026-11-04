@@ -305,6 +305,27 @@ bool DeviceThread::openBoard (String pathToLibrary)
     if (okBoardType != Rhd2000EvalBoardUsb3::OpalKellyBoardType::UNKNOWN)
     {
         deviceFound = true;
+
+        // Always logged (not LOGD) so it shows in Release builds too: a USB 2.0
+        // fallback (e.g. long or passive cable) makes every board call slower and
+        // can cause GUI hitches and dropped transfers.
+        switch (evalBoard->getUsbSpeed())
+        {
+            case OK_USBSPEED_SUPER:
+                LOGC ("HectoSTAR USB connection: USB 3.0 (SuperSpeed)");
+                break;
+            case OK_USBSPEED_HIGH:
+                LOGC ("WARNING: HectoSTAR USB connection is USB 2.0 (High Speed), not USB 3.0. "
+                      "Check the cable (use a short or active USB 3.0 cable) and plug directly into a USB 3.0 port.");
+                break;
+            case OK_USBSPEED_FULL:
+                LOGC ("WARNING: HectoSTAR USB connection is USB 1.1 (Full Speed). "
+                      "Check the cable and plug directly into a USB 3.0 port.");
+                break;
+            default:
+                LOGC ("HectoSTAR USB connection speed: unknown");
+                break;
+        }
     }
     else // board could not be opened
     {

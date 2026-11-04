@@ -145,6 +145,19 @@ Rhd2000EvalBoardUsb3::OpalKellyBoardType Rhd2000EvalBoardUsb3::open()
     return boardType;
 }
 
+// Returns the USB link speed of the open board: OK_USBSPEED_SUPER (USB 3.0),
+// OK_USBSPEED_HIGH (USB 2.0), OK_USBSPEED_FULL, or OK_USBSPEED_UNKNOWN.
+int Rhd2000EvalBoardUsb3::getUsbSpeed()
+{
+    lock_guard<mutex> lockOk (okMutex);
+
+    okTDeviceInfo info;
+    if (dev->GetDeviceInfo (&info) != okCFrontPanel::NoError)
+        return OK_USBSPEED_UNKNOWN;
+
+    return info.usbSpeed;
+}
+
 // Uploads the configuration file (bitfile) to the FPGA.  Returns true if successful.
 bool Rhd2000EvalBoardUsb3::uploadFpgaBitfile (string filename)
 {

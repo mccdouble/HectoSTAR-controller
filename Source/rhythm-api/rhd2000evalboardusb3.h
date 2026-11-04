@@ -194,6 +194,9 @@ public:
     void setPatternStimRepeatCount (int count);
     void setStimOutputType (int outputType);
 
+    //USB link speed of the open board (OK_USBSPEED_* from okFrontPanelDLL.h)
+    int getUsbSpeed();
+
     //Flash Interface Commands
     //These lock the USB interface per operation (not for the whole upload) so
     //acquisition keeps streaming while a pattern file is written to flash.

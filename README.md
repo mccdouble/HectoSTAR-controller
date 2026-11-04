@@ -1,6 +1,6 @@
 # HectoSTAR Controller
 
-Open Ephys plugin for the HectoSTAR system: streams data from the Galvani3 (HectoSTAR chronic) chip or Intan RHD headstages (acute) through an Opal Kelly XEM6310 FPGA, and drives Galvani3 LED stimulation (pulse and pattern output).
+Open Ephys plugin for the HectoSTAR system: streams data from the Galvani3 (HectoSTAR chronic) chip or Intan RHD headstages (acute) through an Opal Kelly XEM7310 FPGA, and drives Galvani3 LED stimulation (pulse and pattern output).
 
 It builds `HectoSTAR-controller.dll` and registers the **HectoSTAR Controller** source and **HectoSTAR Output** sink, so it can be installed alongside the stock RHD Recording Controller without conflict.
 
