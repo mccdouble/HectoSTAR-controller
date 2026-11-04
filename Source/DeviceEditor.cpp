@@ -51,8 +51,11 @@ DeviceEditor::DeviceEditor (GenericProcessor* parentNode,
 
     if (! board->foundInputSource())
     {
-        noBoardsDetectedLabel = std::make_unique<Label> ("NoBoardsDetected", "No Recording Controller Detected.");
-        noBoardsDetectedLabel->setBounds (0, 15, desiredWidth, 125);
+        noBoardsDetectedLabel = std::make_unique<Label> ("NoBoardsDetected",
+                                                         "No HectoSTAR Controller detected.\n\n"
+                                                         "Connect the board, then restart Open Ephys or re-add this processor.");
+        noBoardsDetectedLabel->setBounds (10, 25, desiredWidth - 20, 100);
+        noBoardsDetectedLabel->setMinimumHorizontalScale (1.0f);
         noBoardsDetectedLabel->setAlwaysOnTop (true);
         noBoardsDetectedLabel->toFront (false);
         noBoardsDetectedLabel->setJustificationType (Justification::centred);
@@ -91,7 +94,8 @@ DeviceEditor::DeviceEditor (GenericProcessor* parentNode,
 void DeviceEditor::updateCableDelayBox (int delay)
 {
     LOGD ("Cable delay set to ", delay);
-    cableDelayInterface->setSelectedId (delay);
+    if (cableDelayInterface != nullptr)
+        cableDelayInterface->setSelectedId (delay);
 }
 
 void DeviceEditor::measureImpedance()
@@ -146,6 +150,18 @@ void DeviceEditor::stopAcquisition()
 //TODO, save the waveform parametrs XML
 void DeviceEditor::saveVisualizerEditorParameters (XmlElement* xml)
 {
+    if (sampleRateInterface == nullptr || cableDelayInterface == nullptr)
+    {
+        // no board: keep whatever the loaded configuration had
+        if (savedSampleRateId > 0)
+        {
+            xml->setAttribute ("CableDelay", savedCableDelayId);
+            xml->setAttribute ("SampleRate", savedSampleRateId);
+            xml->setAttribute ("SampleRateString", savedSampleRateText);
+        }
+        return;
+    }
+
     xml->setAttribute ("CableDelay", cableDelayInterface->getSelectedId());
     xml->setAttribute ("SampleRate", sampleRateInterface->getSelectedId());
     xml->setAttribute ("SampleRateString", sampleRateInterface->getText());
@@ -153,6 +169,15 @@ void DeviceEditor::saveVisualizerEditorParameters (XmlElement* xml)
 
 void DeviceEditor::loadVisualizerEditorParameters (XmlElement* xml)
 {
+    if (sampleRateInterface == nullptr || cableDelayInterface == nullptr)
+    {
+        // no board: remember the settings so saving does not drop them
+        savedSampleRateId = xml->getIntAttribute ("SampleRate");
+        savedCableDelayId = xml->getIntAttribute ("CableDelay");
+        savedSampleRateText = xml->getStringAttribute ("SampleRateString");
+        return;
+    }
+
     sampleRateInterface->setSelectedId (xml->getIntAttribute ("SampleRate"));
     cableDelayInterface->setSelectedId (xml->getIntAttribute ("CableDelay"));
 }

@@ -105,6 +105,12 @@ private:
 
     std::unique_ptr<Label> noBoardsDetectedLabel;
 
+    // settings loaded from a saved signal chain while no board is connected,
+    // written back unchanged on save so the configuration is not lost
+    int savedSampleRateId = 0;
+    int savedCableDelayId = 0;
+    String savedSampleRateText;
+
     DeviceThread* board;
     ChannelCanvas* canvas;
 

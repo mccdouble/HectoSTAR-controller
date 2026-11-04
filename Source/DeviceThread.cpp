@@ -329,22 +329,23 @@ bool DeviceThread::openBoard (String pathToLibrary)
     }
     else // board could not be opened
     {
-        bool response = AlertWindow::showOkCancelBox (AlertWindow::NoIcon,
-                                                      "HectoSTAR Controller not found.",
-                                                      "A HectoSTAR Controller could not be found. Please connect one now.",
-                                                      "OK",
-                                                      "Cancel",
-                                                      0,
-                                                      0);
+        const bool retry = AlertWindow::showOkCancelBox (AlertWindow::WarningIcon,
+                                                         "HectoSTAR Controller not found",
+                                                         "No HectoSTAR Controller is connected.\n\n"
+                                                         "Connect the board and click Retry, or click Continue without board "
+                                                         "to keep working in Open Ephys. The HectoSTAR Controller will stay "
+                                                         "in the signal chain but inactive until the board is connected "
+                                                         "and Open Ephys is restarted (or the processor is re-added).",
+                                                         "Retry",
+                                                         "Continue without board",
+                                                         0,
+                                                         0);
 
-        if (response)
-        {
-            openBoard (libraryFilePath.getCharPointer()); // call recursively
-        }
-        else
-        {
-            deviceFound = false;
-        }
+        if (retry)
+            return openBoard (pathToLibrary);
+
+        deviceFound = false;
+        LOGC ("HectoSTAR Controller not found: continuing without the board (processor inactive).");
     }
 
     return deviceFound;
@@ -1282,6 +1283,9 @@ bool DeviceThread::isAuxEnabled()
 
 int DeviceThread::setSampleRate (int sampleRateIndex, bool isTemporary)
 {
+    if (! deviceFound)
+        return 0;
+
     impedanceThread->stopThreadSafely();
     if (! isTemporary)
     {
@@ -1497,6 +1501,9 @@ void DeviceThread::updateRegisters()
 
 void DeviceThread::setCableLength (int hsNum, float length)
 {
+    if (! deviceFound)
+        return;
+
     // Set the MISO sampling delay, which is dependent on the sample rate.
 
     switch (hsNum)
@@ -1532,6 +1539,9 @@ void DeviceThread::setCableLength (int hsNum, float length)
 
 void DeviceThread::setCableDelay (int hsNum, int delay)
 {
+    if (! deviceFound)
+        return;
+
     // Set the MISO sampling delay, which is dependent on the sample rate.
 
     switch (hsNum)
@@ -1611,7 +1621,8 @@ bool DeviceThread::stopAcquisition()
     usbThread->stopAcquisition();
 
     //stop stimulation
-    evalBoard->stopStim();
+    if (deviceFound)
+        evalBoard->stopStim();
 
 
     if (isThreadRunning())
@@ -2005,6 +2016,9 @@ void DeviceThread::uploadStimParameters (int amplitude, int period, int pulse_wi
     LOGD ("pulse_count: ", pulse_count)
     LOGD ("trigger: ", trig_source) //PC 0, external 1
 
+    if (! deviceFound)
+        return;
+
     //Need to scale the values given depending on the current sample rate of the system
     int scale = (evalBoard->getSampleRate() / 1000);
     //period = period * scale;
@@ -2025,6 +2039,8 @@ void DeviceThread::uploadStimParameters (int amplitude, int period, int pulse_wi
 void DeviceThread::startStim()
 {
     LOGD ("STARTING STIM")
+    if (! deviceFound)
+        return;
     evalBoard->startStim();
 }
 
@@ -2032,6 +2048,8 @@ void DeviceThread::stopStim()
 {
     //stop stim is unified
     LOGD ("STOPPING STIM")
+    if (! deviceFound)
+        return;
     evalBoard->stopStim();
 }
 
@@ -2046,12 +2064,16 @@ void DeviceThread::setStimOutputType (int outputSelection)
     {
         LOGD ("SET TO PATTERN OUTPUT")
     }
-    evalBoard->setStimOutputType (outputSelection);
+    if (deviceFound)
+        evalBoard->setStimOutputType (outputSelection);
 }
 
 int DeviceThread::uploadPatternFile (File patternStimFile, std::function<void (double)> progress)
 {
     LOGD ("UPLOADING PATTERN FILE")
+    if (! deviceFound)
+        return -1;
+
     std::string filePath = patternStimFile.getFullPathName().toStdString();
     int file_size = patternStimFile.getSize();
 
@@ -2084,5 +2106,6 @@ double DeviceThread::getPatternUploadProgress() const
 
 void DeviceThread::setPatternStimRepeatCount (int count)
 {
-    evalBoard->setPatternStimRepeatCount (count);
+    if (deviceFound)
+        evalBoard->setPatternStimRepeatCount (count);
 }

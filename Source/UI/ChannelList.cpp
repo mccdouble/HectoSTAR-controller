@@ -407,6 +407,12 @@ int ChannelList::getRequiredWidth() const
 
 void ChannelList::beginPatternUpload (const File& file, std::function<void (bool)> afterUpload)
 {
+    if (! board->foundInputSource())
+    {
+        AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Upload pattern", "No HectoSTAR controller is connected.");
+        return;
+    }
+
     const String fileName = file.getFileName();
     const int64 fileSize = file.getSize();
 
