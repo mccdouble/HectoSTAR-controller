@@ -26,13 +26,18 @@
 
 #include <VisualizerEditorHeaders.h>
 
+namespace PatternEditor
+{
+class PatternEditorWindow;
+}
+
 namespace RhythmNode
 {
 
 class DeviceThread;
 class DeviceEditor;
 class ChannelComponent;
-class ChannelCanvas; 
+class ChannelCanvas;
 
 class ChannelList : public Component,
                     public Button::Listener,
@@ -112,6 +117,16 @@ private:
     //non-modal progress window shown while a pattern file uploads
     class PatternUploadWindow;
     std::unique_ptr<PatternUploadWindow> uploadWindow;
+
+    //pattern editor (builds pattern files in the plugin)
+    std::unique_ptr<ColourButton> patternEditorButton;
+    std::unique_ptr<::PatternEditor::PatternEditorWindow> patternEditorWindow;
+
+    /** Writes a pattern file to flash in the background with the progress window. */
+    void beginPatternUpload (const File& file, std::function<void (bool)> afterUpload);
+
+    /** Upload requested by the pattern editor; selects Pattern Output with its repeat count when done. */
+    void uploadFromPatternEditor (const File& file, int repeats);
     std::unique_ptr<Label> repeatLabel;
 
     //pulse stim params

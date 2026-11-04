@@ -28,6 +28,7 @@
 #include "../DeviceEditor.h"
 #include "../DeviceThread.h"
 #include "../Headstage.h"
+#include "PatternEditor/PatternEditorWindow.h"
 
 using namespace RhythmNode;
 
@@ -142,8 +143,14 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
     //waveform input labels
     repeatLabel = std::make_unique<Label> ("Repeat Label", "Count");
     repeatLabel->setEditable (false);
-    repeatLabel->setBounds (675, 10, 200, 25);
+    repeatLabel->setBounds (675, 10, 50, 25);
     addAndMakeVisible (repeatLabel.get());
+
+    //opens the pattern editor window (build, save, export and upload patterns)
+    patternEditorButton = std::make_unique<ColourButton> ("Pattern Editor...", FontOptions (14.0f));
+    patternEditorButton->setBounds (730, 10, 130, 25);
+    patternEditorButton->addListener (this);
+    addAndMakeVisible (patternEditorButton.get());
 
     //waveform input labels
     waveformInputLabel = std::make_unique<Label> ("Waveform Labels", "Amplitude(uA)    Period(ms)     Pulse Width(ms)    Rise/Fall Time    #Pulses   Trigger Type");
@@ -245,6 +252,7 @@ void ChannelList::lookAndFeelChanged()
     //outputTypeLabel->setColour (Label::textColourId, findColour (ThemeColours::defaultText));
     uploadStimParamButton->setColours (findColour (ThemeColours::defaultText), findColour (ThemeColours::highlightedFill));  
     selectPatternFileButton->setColours (findColour (ThemeColours::defaultText), findColour (ThemeColours::defaultFill));
+    patternEditorButton->setColours (findColour (ThemeColours::defaultText), findColour (ThemeColours::defaultFill));
   
 
     for (int i = 0; i < 64; ++i)
@@ -339,40 +347,29 @@ void ChannelList::buttonClicked (Button* btn)
         if (fileChooser.browseForFileToOpen())
 
         {
-            File chosenFile = fileChooser.getResult();
-            const String fileName = chosenFile.getFileName();
-            const int64 fileSize = chosenFile.getSize();
-
-            Component::SafePointer<ChannelList> safeThis (this);
-
-            // Upload in the background (owned by the DeviceThread); the GUI stays usable.
-            const bool started = board->startPatternUpload (chosenFile, [safeThis, fileName, fileSize] (bool ok)
-                                                            {
-                                                                String message = (ok ? "File upload completed!\nFile Name: " : "File upload FAILED!\nFile Name: ") + fileName;
-
-                                                                if (ok)
-                                                                    message += "\nFile Length: " + String (fileSize) + " bytes";
-
-                                                                AlertWindow::showMessageBoxAsync (ok ? AlertWindow::InfoIcon : AlertWindow::WarningIcon,
-                                                                                                  ok ? "Upload Successful" : "Upload Failed",
-                                                                                                  message);
-
-                                                                if (safeThis != nullptr)
-                                                                {
-                                                                    safeThis->uploadWindow.reset();
-                                                                    safeThis->selectPatternFileButton->setEnabled (true);
-                                                                    safeThis->uploadStimParamButton->setEnabled (true);
-                                                                }
-                                                            });
-
-            if (started)
-            {
-                // block re-entry until it finishes
-                selectPatternFileButton->setEnabled (false);
-                uploadStimParamButton->setEnabled (false);
-                uploadWindow = std::make_unique<PatternUploadWindow> (board, chosenFile, this);
-            }
+            beginPatternUpload (fileChooser.getResult(), nullptr);
         }
+    }
+
+    //PATTERN EDITOR
+    if (btn == patternEditorButton.get())
+    {
+        if (patternEditorWindow == nullptr)
+        {
+            Component::SafePointer<ChannelList> safeThis (this);
+            const auto probe = (PatternGen::ProbeMapping) jlimit (1, 4, probeTypeSelect->getSelectedId());
+
+            patternEditorWindow = std::make_unique<PatternEditor::PatternEditorWindow> (
+                probe,
+                [safeThis] (const File& file, int repeats)
+                {
+                    if (safeThis != nullptr)
+                        safeThis->uploadFromPatternEditor (file, repeats);
+                });
+        }
+
+        patternEditorWindow->setVisible (true);
+        patternEditorWindow->toFront (true);
     }
 
     /*
@@ -396,6 +393,71 @@ void ChannelList::buttonClicked (Button* btn)
     }
     */
     
+}
+
+void ChannelList::beginPatternUpload (const File& file, std::function<void (bool)> afterUpload)
+{
+    const String fileName = file.getFileName();
+    const int64 fileSize = file.getSize();
+
+    Component::SafePointer<ChannelList> safeThis (this);
+
+    // Upload in the background (owned by the DeviceThread); the GUI stays usable.
+    const bool started = board->startPatternUpload (file, [safeThis, fileName, fileSize, afterUpload] (bool ok)
+                                                    {
+                                                        String message = (ok ? "File upload completed!\nFile Name: " : "File upload FAILED!\nFile Name: ") + fileName;
+
+                                                        if (ok)
+                                                            message += "\nFile Length: " + String (fileSize) + " bytes";
+
+                                                        AlertWindow::showMessageBoxAsync (ok ? AlertWindow::InfoIcon : AlertWindow::WarningIcon,
+                                                                                          ok ? "Upload Successful" : "Upload Failed",
+                                                                                          message);
+
+                                                        if (safeThis != nullptr)
+                                                        {
+                                                            safeThis->uploadWindow.reset();
+                                                            safeThis->selectPatternFileButton->setEnabled (true);
+                                                            safeThis->uploadStimParamButton->setEnabled (true);
+                                                        }
+
+                                                        if (afterUpload)
+                                                            afterUpload (ok);
+                                                    });
+
+    if (started)
+    {
+        // block re-entry until it finishes
+        selectPatternFileButton->setEnabled (false);
+        uploadStimParamButton->setEnabled (false);
+        uploadWindow = std::make_unique<PatternUploadWindow> (board, file, this);
+    }
+    else
+    {
+        AlertWindow::showMessageBoxAsync (AlertWindow::InfoIcon, "Upload pattern", "A pattern upload is already in progress.");
+    }
+}
+
+void ChannelList::uploadFromPatternEditor (const File& file, int repeats)
+{
+    if (! board->foundInputSource())
+    {
+        AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Upload pattern", "No HectoSTAR controller is connected.");
+        return;
+    }
+
+    Component::SafePointer<ChannelList> safeThis (this);
+
+    beginPatternUpload (file, [safeThis, repeats] (bool ok)
+                        {
+                            if (! ok || safeThis == nullptr)
+                                return;
+
+                            // ready to play: pattern output with the editor's repeat count
+                            safeThis->patternRepeatCount->setText (String (repeats));
+                            safeThis->outputTypeSelect->setSelectedId (2, sendNotificationSync);
+                            safeThis->board->setPatternStimRepeatCount (repeats - 1);
+                        });
 }
 
 void ChannelList::disableAll()

@@ -35,7 +35,13 @@ Board. 2-Shank Chronic is not yet verified and must be labelled as such.
    `Samples`, `Formula`), and `.json` save/load (`Json`). A design with one
    built-in block per LED renders exactly what MATLAB does (checked by
    `model_tests`, also after a JSON round trip).
-3. **Editor window.** Timeline, probe map, inspector, sequencing tools.
+3. **Editor window (first version).** `Source/UI/PatternEditor/`, opened
+   with "Pattern Editor..." in the stim panel. Probe map + sequencing tools
+   (add blocks to the selected LEDs, stagger) on the left, timeline in the
+   middle, inspector below, top bar for duration / probe / repeats / flash
+   usage, `.json` open/save, `.bin` export and upload. Snapshot undo/redo.
+   Upload goes through the background pattern upload, then selects Pattern
+   Output with the pattern's repeat count.
 4. **Preview and feedback.** Waveform drawing in blocks, playback animation
    on the probe map, flash capacity and size readouts.
 5. **Output.** Save `.bin`, and generate and upload to the board in one step
