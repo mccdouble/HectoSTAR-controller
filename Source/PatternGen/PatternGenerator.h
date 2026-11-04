@@ -89,6 +89,18 @@ int numSamplesForDuration (double durationSec);
     rounded, exactly as generateWaveformsFromUITable does for one channel. */
 void renderChannel (const ChannelWaveform& wave, int numSamples, std::uint8_t* out);
 
+/** Renders samples [firstSample, endSample) of a waveform, before clipping,
+    into out[0 .. endSample - firstSample). Values equal those of a full render
+    at the same sample indices. */
+void renderWaveformRange (const ChannelWaveform& wave, int firstSample, int endSample, double* out);
+
+/** Clips a current to 0..100 uA and rounds it to a DAC step (NaN -> 0), like
+    the MATLAB tool's y(y<0)=0; y(y>100)=100; uint8(round(y)). */
+std::uint8_t toDacCurrent (double microamps);
+
+/** Time of sample i in seconds, computed like MATLAB's (0:N-1)/fs. */
+inline double sampleTimeSec (int i) { return (double) i / kSampleRateHz; }
+
 /** Renders the MATLAB table: waves[i] drives GUI channel i + 1. Returns false
     (and sets error) for a non-positive duration. */
 bool renderPattern (const std::array<ChannelWaveform, kNumLeds>& waves,

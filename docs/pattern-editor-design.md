@@ -30,8 +30,11 @@ Board. 2-Shank Chronic is not yet verified and must be labelled as such.
 1. **Generator and file writer (done).** `Source/PatternGen/` ports the
    MATLAB waveform backend and "Generate File" step to plain C++17 (no JUCE),
    verified byte for byte against MATLAB by `tests/pattern_parity`.
-2. **Pattern model.** Blocks on LED lanes rendered through the generator;
-   save and load the design as `.json` (the `.bin` is not editable).
+2. **Pattern model (done).** `PatternModel` (blocks on LED lanes, higher
+   value wins on overlap, fades), custom waveforms (`Breakpoints`,
+   `Samples`, `Formula`), and `.json` save/load (`Json`). A design with one
+   built-in block per LED renders exactly what MATLAB does (checked by
+   `model_tests`, also after a JSON round trip).
 3. **Editor window.** Timeline, probe map, inspector, sequencing tools.
 4. **Preview and feedback.** Waveform drawing in blocks, playback animation
    on the probe map, flash capacity and size readouts.
@@ -67,3 +70,59 @@ Board. 2-Shank Chronic is not yet verified and must be labelled as such.
   total stimulation time it gives.
 - The generator and file writer stay separate from the UI so a future
   format change (RAM chip, compression, rate) only touches the writer.
+
+## Pattern model (phase 2)
+
+- A block plays only inside `[start, start + length)`; samples are
+  included when their time is in that window. Built-in types use the block
+  start as MATLAB's delay, so their math is unchanged.
+- Rendering per block: compute the current in uA, apply fades (linear gain
+  from the start / to the end), clip to 0..100 and round to a DAC step, then
+  take the max with what is already on that LED.
+- Custom waveforms:
+  - **Breakpoints**: `[time, value]` points from the block start, joined by
+    step, linear or smooth (cosine) segments. Without repeat, 0 outside the
+    first..last point; with repeat, tiles every last-point-time seconds.
+  - **Samples**: values at 20 kHz from the block start (e.g. a CSV import),
+    0 after the end unless repeated.
+  - **Formula**: a MATLAB-flavoured expression of `t` (s since block
+    start), `T` (block length), `fs`, with MATLAB precedence (`-2^2 = -4`,
+    left-associative `^`), element-wise spellings (`.*`), comparisons and
+    logic (1/0), and functions including `mod`, `rem`, `round`, `square`,
+    `sawtooth` that match MATLAB exactly. See `Formula.h`.
+- `naturalLength` gives the length a waveform implies (count x period,
+  wavelet D, last breakpoint, sample count) so the editor can size new
+  blocks; 0 means "until the block ends".
+- `validate` reports anything that stops generation: duration, LEDs out of
+  1-64, formula errors, unordered breakpoints, flash capacity.
+
+### Design file (`.json`)
+
+```json
+{
+  "format": "hectostar-pattern",
+  "version": 1,
+  "duration": 0.5,
+  "probe": "4 Shank Acute",
+  "repeatCount": 1,
+  "blocks": [
+    {
+      "id": 1, "led": 5, "start": 0.01, "length": 0.1, "link": 2,
+      "label": "10 Hz train", "fadeIn": 0.002,
+      "wave": {"kind": "builtin", "type": "fixedpulse",
+               "freq": 10, "amp": 60, "offset": 0.01, "duty": 50, "step": 0}
+    },
+    {"id": 2, "led": 6, "start": 0, "length": 0.2,
+     "wave": {"kind": "breakpoints", "interpolation": "linear", "repeat": true,
+              "points": [[0, 0], [0.005, 80], [0.01, 0]]}},
+    {"id": 3, "led": 7, "start": 0, "length": 0.2,
+     "wave": {"kind": "formula", "expression": "50*(1+sin(2*pi*8*t))"}},
+    {"id": 4, "led": 8, "start": 0.05, "length": 0.01,
+     "wave": {"kind": "samples", "repeat": false, "values": [10, 20, 30]}}
+  ]
+}
+```
+
+Built-in fields keep the MATLAB table's meanings (`freq` = "Freq/#Pulses",
+`offset` = "Offset/Period", `duty` = "Duty (%) / Cycles"). Numbers are
+written with full precision; NaN/Inf parameters are written as `null`.

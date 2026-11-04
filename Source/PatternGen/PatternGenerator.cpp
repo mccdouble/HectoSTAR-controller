@@ -11,6 +11,7 @@
 */
 
 #include "PatternGenerator.h"
+#include "MatlabMath.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -22,109 +23,24 @@ namespace PatternGen
 namespace
 {
 
-constexpr double kPi = 3.141592653589793; // MATLAB's pi
-constexpr double kTwoPi = 2.0 * kPi;     // MATLAB's 2*pi (exact doubling)
+using matlab::kPi;
+using matlab::kTwoPi;
 
-// MATLAB min/max ignore NaN
-double mMin (double a, double b) { return std::isnan (a) ? b : (std::isnan (b) ? a : std::min (a, b)); }
-double mMax (double a, double b) { return std::isnan (a) ? b : (std::isnan (b) ? a : std::max (a, b)); }
+double mMin (double a, double b) { return matlab::min (a, b); }
+double mMax (double a, double b) { return matlab::max (a, b); }
+double mRound (double x) { return matlab::round (x); }
+double mMod (double x, double y) { return matlab::mod (x, y); }
+double mSquare (double t, double duty) { return matlab::square (t, duty); }
+double mSawtooth (double t) { return matlab::sawtooth (t); }
 
-// MATLAB round: half away from zero
-double mRound (double x) { return std::round (x); }
+double sampleTime (int i) { return sampleTimeSec (i); } // t = (0:N-1)/fs
 
-// MATLAB's floating-point mod (from MATLAB Coder's coder.internal.scalar.mod):
-// fmod, except that a quotient within eps of an integer gives exactly 0 when
-// y is not an integer, and the result takes the sign of y.
-double mMod (double x, double y)
+// Renders samples [first, end) of a waveform into out[0 .. end - first), before
+// clipping. Each sample depends only on its own absolute time, so any window
+// gives exactly the values a full-length render would.
+void renderRangeDouble (const ChannelWaveform& cfg, int first, int end, double* out)
 {
-    if (y == 0)
-        return x == 0 ? y : x;
-    if (std::isnan (x) || std::isnan (y) || std::isinf (x))
-        return NAN;
-    if (std::isinf (y))
-    {
-        if (y > 0)
-            return x > 0 ? x : (x < 0 ? y : 0.0);
-        return x > 0 ? y : (x < 0 ? x : -0.0);
-    }
-
-    double r;
-    if (y > std::floor (y))
-    {
-        const double q = std::fabs (x / y);
-        r = (std::fabs (q - std::floor (q + 0.5)) > DBL_EPSILON * q) ? std::fmod (x, y) : 0.0;
-    }
-    else
-    {
-        r = std::fmod (x, y);
-    }
-
-    if (r == 0)
-        return y * 0.0;
-    if ((r < 0 && y > 0) || (r > 0 && y < 0))
-        r += y;
-    return r;
-}
-
-// MATLAB's floating-point rem: same zero snapping as mod, sign of x
-double mRem (double x, double y)
-{
-    if (y == 0 || std::isnan (x) || std::isnan (y) || std::isinf (x))
-        return NAN;
-    if (std::isinf (y))
-        return x;
-
-    double r;
-    if (y > std::floor (y))
-    {
-        const double q = std::fabs (x / y);
-        r = (std::fabs (q - std::floor (q + 0.5)) > DBL_EPSILON * q) ? std::fmod (x, y) : 0.0;
-    }
-    else
-    {
-        r = std::fmod (x, y);
-    }
-
-    return r == 0 ? x * 0.0 : r;
-}
-
-// Signal Processing Toolbox square(t, duty)
-double mSquare (double t, double duty)
-{
-    const double tmp = mMod (t, kTwoPi);
-    const double w0 = kTwoPi * duty / 100.0;
-    return tmp < w0 ? 1.0 : -1.0;
-}
-
-// Signal Processing Toolbox sawtooth(t) (width = 1)
-double mSawtooth (double t)
-{
-    const double width = 1.0;
-    const double c1 = 2.0;
-    const double c2 = 2.0;
-    const double rt = mRem (t, kTwoPi) * (1.0 / kTwoPi);
-    const double neg = t < 0 ? 1.0 : 0.0;
-
-    if (rt > 0)
-    {
-        if (rt > width)
-            return (-neg - rt + 1.0 - 0.5 * (1.0 - width)) * c2;
-        return (neg + rt - 0.5 * width) * c1;
-    }
-    if (rt < 0)
-    {
-        if (rt < width - 1.0)
-            return (neg + rt - 0.5 * width) * c1;
-        return (-neg - rt + 1.0 - 0.5 * (1.0 - width)) * c2;
-    }
-    return (rt - 0.5 * width) * c1;
-}
-
-double sampleTime (int i) { return (double) i / kSampleRateHz; } // t = (0:N-1)/fs
-
-void renderChannelDouble (const ChannelWaveform& cfg, int numSamples, std::vector<double>& y)
-{
-    y.assign ((std::size_t) numSamples, 0.0);
+    std::fill (out, out + (end - first), 0.0);
 
     const double amp = mMin (cfg.amp, (double) kMaxCurrentUa); // min(data{r,4},100)
 
@@ -134,11 +50,11 @@ void renderChannelDouble (const ChannelWaveform& cfg, int numSamples, std::vecto
             break;
 
         case WaveType::Sine:
-            for (int i = 0; i < numSamples; ++i)
+            for (int i = first; i < end; ++i)
             {
                 const double t = sampleTime (i);
                 if (t >= cfg.delay)
-                    y[i] = cfg.offset + amp * std::sin (kTwoPi * cfg.freq * (t - cfg.delay));
+                    out[i - first] = cfg.offset + amp * std::sin (kTwoPi * cfg.freq * (t - cfg.delay));
             }
             break;
 
@@ -154,14 +70,14 @@ void renderChannelDouble (const ChannelWaveform& cfg, int numSamples, std::vecto
                 const double activeT = (duty / 100.0) * T;
                 const double tEnd = tStart + nCycles * T;
 
-                for (int i = 0; i < numSamples; ++i)
+                for (int i = first; i < end; ++i)
                 {
                     const double t = sampleTime (i);
                     if (t >= tStart && t < tEnd)
                     {
                         const double phase = mMod (t - tStart, T);
                         if (activeT > 0 && phase < activeT)
-                            y[i] = amp * std::sin ((phase / activeT) * kTwoPi);
+                            out[i - first] = amp * std::sin ((phase / activeT) * kTwoPi);
                     }
                 }
             }
@@ -169,20 +85,20 @@ void renderChannelDouble (const ChannelWaveform& cfg, int numSamples, std::vecto
         }
 
         case WaveType::Pulse:
-            for (int i = 0; i < numSamples; ++i)
+            for (int i = first; i < end; ++i)
             {
                 const double t = sampleTime (i);
                 if (t >= cfg.delay)
-                    y[i] = cfg.offset + amp * mSquare (kTwoPi * cfg.freq * (t - cfg.delay), cfg.duty);
+                    out[i - first] = cfg.offset + amp * mSquare (kTwoPi * cfg.freq * (t - cfg.delay), cfg.duty);
             }
             break;
 
         case WaveType::Sawtooth:
-            for (int i = 0; i < numSamples; ++i)
+            for (int i = first; i < end; ++i)
             {
                 const double t = sampleTime (i);
                 if (t >= cfg.delay)
-                    y[i] = cfg.offset + amp * mSawtooth (kTwoPi * cfg.freq * (t - cfg.delay));
+                    out[i - first] = cfg.offset + amp * mSawtooth (kTwoPi * cfg.freq * (t - cfg.delay));
             }
             break;
 
@@ -198,14 +114,14 @@ void renderChannelDouble (const ChannelWaveform& cfg, int numSamples, std::vecto
                 const double rampT = (duty / 100.0) * T;
                 const double tEnd = tStart + nCycles * T;
 
-                for (int i = 0; i < numSamples; ++i)
+                for (int i = first; i < end; ++i)
                 {
                     const double t = sampleTime (i);
                     if (t >= tStart && t < tEnd)
                     {
                         const double phase = mMod (t - tStart, T);
                         if (rampT > 0 && phase < rampT)
-                            y[i] = amp * (phase / rampT);
+                            out[i - first] = amp * (phase / rampT);
                     }
                 }
             }
@@ -218,13 +134,13 @@ void renderChannelDouble (const ChannelWaveform& cfg, int numSamples, std::vecto
             const double f2 = cfg.offset; // repurposed
             const double base = cfg.duty; // repurposed
 
-            for (int i = 0; i < numSamples; ++i)
+            for (int i = first; i < end; ++i)
             {
                 const double t = sampleTime (i);
                 if (t >= cfg.delay)
                 {
                     const double td = t - cfg.delay;
-                    y[i] = base + (amp / 2.0) * (std::sin (kTwoPi * f1 * td) + std::sin (kTwoPi * f2 * td));
+                    out[i - first] = base + (amp / 2.0) * (std::sin (kTwoPi * f1 * td) + std::sin (kTwoPi * f2 * td));
                 }
             }
             break;
@@ -239,14 +155,14 @@ void renderChannelDouble (const ChannelWaveform& cfg, int numSamples, std::vecto
             {
                 const double totalTime = nPulses * period;
 
-                for (int i = 0; i < numSamples; ++i)
+                for (int i = first; i < end; ++i)
                 {
                     const double t = sampleTime (i);
                     if (t >= cfg.delay)
                     {
                         const double td = t - cfg.delay;
                         if (td < totalTime && mMod (td, period) / period < (cfg.duty / 100.0))
-                            y[i] = amp;
+                            out[i - first] = amp;
                     }
                 }
             }
@@ -270,7 +186,7 @@ void renderChannelDouble (const ChannelWaveform& cfg, int numSamples, std::vecto
             const double cycles = (nPeaks - 1.0) / 2.0;
             const double f = cycles / D;
 
-            for (int i = 0; i < numSamples; ++i)
+            for (int i = first; i < end; ++i)
             {
                 const double t = sampleTime (i);
                 if (t >= tStart && t <= tEnd)
@@ -278,7 +194,7 @@ void renderChannelDouble (const ChannelWaveform& cfg, int numSamples, std::vecto
                     const double u = (t - tc) / (D / 2.0);
                     const double w = 0.5 * (1.0 + std::cos (kPi * u));
                     const double c = std::cos (kTwoPi * f * (t - tc));
-                    y[i] = amp * w * (c * c);
+                    out[i - first] = amp * w * (c * c);
                 }
             }
             break;
@@ -296,7 +212,7 @@ void renderChannelDouble (const ChannelWaveform& cfg, int numSamples, std::vecto
             {
                 const double tEnd = tStart + nPulses * period;
 
-                for (int i = 0; i < numSamples; ++i)
+                for (int i = first; i < end; ++i)
                 {
                     const double t = sampleTime (i);
                     if (t >= tStart && t < tEnd)
@@ -304,7 +220,7 @@ void renderChannelDouble (const ChannelWaveform& cfg, int numSamples, std::vecto
                         const double tau = t - tStart;
                         const double pulseIdx = std::floor (tau / period);
                         if (mMod (tau, period) / period < (cfg.duty / 100.0))
-                            y[i] = A0 + dA * pulseIdx;
+                            out[i - first] = A0 + dA * pulseIdx;
                     }
                 }
             }
@@ -396,10 +312,21 @@ int numSamplesForDuration (double durationSec)
     return (int) mRound (durationSec * kSampleRateHz);
 }
 
+void renderWaveformRange (const ChannelWaveform& wave, int firstSample, int endSample, double* out)
+{
+    if (endSample > firstSample)
+        renderRangeDouble (wave, firstSample, endSample, out);
+}
+
+std::uint8_t toDacCurrent (double microamps)
+{
+    return toDacValue (microamps);
+}
+
 void renderChannel (const ChannelWaveform& wave, int numSamples, std::uint8_t* out)
 {
-    std::vector<double> y;
-    renderChannelDouble (wave, numSamples, y);
+    std::vector<double> y ((std::size_t) numSamples);
+    renderWaveformRange (wave, 0, numSamples, y.data());
 
     for (int i = 0; i < numSamples; ++i)
         out[i] = toDacValue (y[i]);

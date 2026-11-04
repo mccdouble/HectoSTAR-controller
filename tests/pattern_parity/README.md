@@ -25,6 +25,13 @@ python compare.py $OUT/out_matlab $OUT/out_cpp
 `compare.py` exits non-zero and lists the first differing byte of each
 mismatched case.
 
+Then the pattern model tests (`PatternModel`, `Formula`, `Json`), which also
+re-check MATLAB equivalence through the block model and a JSON round trip:
+
+```bash
+$OUT/build/Release/model_tests $OUT/cases $OUT/out_matlab
+```
+
 ## Cases
 
 `make_cases.py` writes hand-made cases (`h_*`: one per waveform type, duty
@@ -41,5 +48,6 @@ Matching MATLAB to the byte depends on reproducing its floating-point
 every expression in the same order. See the comments in
 `PatternGenerator.cpp`.
 
-Last run (2026-11-03, MATLAB R2025b, MSVC 17 x64): 179 of 179 cases
-identical, 36,555,520 bytes compared.
+Last run (2026-11-04, MATLAB R2025b, MSVC 17 x64): 179 of 179 cases
+identical, 36,555,520 bytes compared; model tests 113 of 113 checks passed
+(179 of 179 MATLAB-identical through the block model and after JSON reload).
