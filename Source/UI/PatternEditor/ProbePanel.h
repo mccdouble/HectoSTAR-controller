@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include "EditorStyle.h"
 #include "PatternDocument.h"
 
 namespace PatternEditor
@@ -66,11 +67,14 @@ private:
     PatternDocument& doc;
     ProbeMap map;
 
-    TextButton selectAll { "All" }, selectNone { "None" }, selectInUse { "In use" };
+    EditorButton selectAll { "All" }, selectNone { "None" }, selectInUse { "In use" };
     Label orderLabel { {}, "Order" }, stepLabel { {}, "Step (ms)" }, startLabel { {}, "Start (ms)" };
     ComboBox orderBox;
     TextEditor stepEditor, startEditor;
-    TextButton addButton { "Add blocks" }, staggerButton { "Stagger selected" };
+    EditorButton addButton { "Add blocks to selected LEDs", EditorButton::Style::Accent };
+    EditorButton staggerButton { "Stagger selected blocks" };
+
+    juce::Rectangle<int> ledsHeader, sequenceHeader, hintArea;
 
     SequenceOrder order() const;
     double stepSeconds() const;

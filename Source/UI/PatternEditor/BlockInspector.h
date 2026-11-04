@@ -13,6 +13,7 @@
 
 #pragma once
 
+#include "EditorStyle.h"
 #include "PatternDocument.h"
 
 #include <array>
@@ -40,7 +41,7 @@ private:
     Label startLabel { {}, "Start (ms)" }, lengthLabel { {}, "Length (ms)" }, fadeInLabel { {}, "Fade in (ms)" },
         fadeOutLabel { {}, "Fade out (ms)" };
     TextEditor startEditor, lengthEditor, fadeInEditor, fadeOutEditor;
-    TextButton fitButton { "Fit" };
+    EditorButton fitButton { "Fit" };
 
     // built-in parameters: freq, amp, offset, duty, step
     std::array<Label, 5> paramLabels;
@@ -52,12 +53,13 @@ private:
     TextEditor pointsEditor;
     ComboBox interpBox;
     ToggleButton repeatToggle { "Repeat" };
-    TextButton importButton { "Import CSV..." };
+    EditorButton importButton { "Import CSV..." };
     Label samplesInfo;
     TextEditor formulaEditor;
     Label formulaHelp;
 
-    TextButton unlinkButton { "Unlink" }, deleteButton { "Delete" };
+    EditorButton unlinkButton { "Unlink" };
+    EditorButton deleteButton { "Delete", EditorButton::Style::Danger };
 
     std::unique_ptr<FileChooser> chooser;
     bool updating = false;

@@ -360,6 +360,7 @@ void ChannelList::buttonClicked (Button* btn)
             const auto probe = (PatternGen::ProbeMapping) jlimit (1, 4, probeTypeSelect->getSelectedId());
 
             patternEditorWindow = std::make_unique<PatternEditor::PatternEditorWindow> (
+                *this,
                 probe,
                 [safeThis] (const File& file, int repeats)
                 {

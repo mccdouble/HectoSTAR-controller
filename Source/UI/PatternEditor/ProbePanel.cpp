@@ -80,7 +80,7 @@ void ProbeMap::paint (Graphics& g)
     for (int led : activeLeds (doc.pattern()))
         used.insert (led);
 
-    g.setFont (FontOptions (11.0f));
+    g.setFont (FontOptions (12.0f));
     for (int s = 0; s < 4; ++s)
     {
         g.setColour (text.withAlpha (0.7f));
@@ -163,7 +163,7 @@ ProbePanel::ProbePanel (PatternDocument& d) : doc (d), map (d)
 
     for (auto* l : { &orderLabel, &stepLabel, &startLabel })
     {
-        l->setFont (FontOptions (12.0f));
+        l->setFont (FontOptions (13.0f));
         addAndMakeVisible (l);
     }
 
@@ -193,40 +193,57 @@ ProbePanel::ProbePanel (PatternDocument& d) : doc (d), map (d)
 void ProbePanel::paint (Graphics& g)
 {
     g.fillAll (findColour (ThemeColours::componentBackground));
+    drawSectionHeader (g, *this, ledsHeader, "LEDs");
+    drawSectionHeader (g, *this, sequenceHeader, "Sequence");
+
+    g.setColour (findColour (ThemeColours::defaultText).withAlpha (0.65f));
+    g.setFont (FontOptions (12.0f));
+    g.drawFittedText ("Click, Ctrl-click or drag to select. Tinted LEDs have blocks.", hintArea, Justification::centredLeft, 2);
 }
 
 void ProbePanel::resized()
 {
-    auto b = getLocalBounds().reduced (6);
+    auto b = getLocalBounds().reduced (10, 8);
 
-    auto row = b.removeFromTop (24);
-    const int w = row.getWidth() / 3;
-    selectAll.setBounds (row.removeFromLeft (w).reduced (2, 0));
-    selectNone.setBounds (row.removeFromLeft (w).reduced (2, 0));
-    selectInUse.setBounds (row.reduced (2, 0));
-    b.removeFromTop (6);
-
-    auto tools = b.removeFromBottom (24 * 5 + 4 * 4);
-    map.setBounds (b);
-
-    auto line = [&tools]
+    // sequence tools at the bottom, fixed height
+    auto seq = b.removeFromBottom (22 + 4 * 30 + 2 * 34);
+    sequenceHeader = seq.removeFromTop (22);
+    seq.removeFromTop (6);
+    auto line = [&seq] (int h)
     {
-        auto r = tools.removeFromTop (24);
-        tools.removeFromTop (4);
+        auto r = seq.removeFromTop (h);
+        seq.removeFromTop (4);
         return r;
     };
 
-    auto r = line();
-    orderLabel.setBounds (r.removeFromLeft (64));
+    auto r = line (26);
+    orderLabel.setBounds (r.removeFromLeft (80));
     orderBox.setBounds (r);
-    r = line();
-    stepLabel.setBounds (r.removeFromLeft (64));
-    stepEditor.setBounds (r.removeFromLeft (60));
-    r = line();
-    startLabel.setBounds (r.removeFromLeft (64));
-    startEditor.setBounds (r.removeFromLeft (60));
-    addButton.setBounds (line());
-    staggerButton.setBounds (line());
+    r = line (26);
+    stepLabel.setBounds (r.removeFromLeft (80));
+    stepEditor.setBounds (r.removeFromLeft (80));
+    r = line (26);
+    startLabel.setBounds (r.removeFromLeft (80));
+    startEditor.setBounds (r.removeFromLeft (80));
+    addButton.setBounds (line (30));
+    staggerButton.setBounds (line (30));
+
+    b.removeFromBottom (10);
+
+    // LEDs: header, selection buttons, hint, map
+    ledsHeader = b.removeFromTop (22);
+    b.removeFromTop (6);
+    auto buttons = b.removeFromTop (28);
+    const int w = buttons.getWidth() / 3;
+    selectAll.setBounds (buttons.removeFromLeft (w).reduced (2, 0));
+    selectNone.setBounds (buttons.removeFromLeft (w).reduced (2, 0));
+    selectInUse.setBounds (buttons.reduced (2, 0));
+    b.removeFromTop (4);
+    hintArea = b.removeFromTop (30);
+
+    // keep cells from getting stretched tall on big screens
+    const int maxHeight = 18 + 16 * 30;
+    map.setBounds (b.withHeight (jmin (b.getHeight(), maxHeight)));
 }
 
 SequenceOrder ProbePanel::order() const

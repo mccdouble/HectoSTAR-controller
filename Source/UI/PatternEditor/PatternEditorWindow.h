@@ -15,6 +15,7 @@
 #pragma once
 
 #include "BlockInspector.h"
+#include "EditorStyle.h"
 #include "PatternDocument.h"
 #include "ProbePanel.h"
 #include "TimelineView.h"
@@ -39,21 +40,29 @@ public:
     std::function<void()> onTitleChanged;
 
 private:
+    static constexpr int kToolbarHeight = 44;
+    static constexpr int kSettingsHeight = 40;
+    static constexpr int kStatusHeight = 26;
+    static constexpr int kInspectorHeight = 178;
+    static constexpr int kProbePanelWidth = 290;
+
     PatternDocument doc;
     std::function<void (const File&, int)> uploadCallback;
 
-    TextButton newButton { "New" }, openButton { "Open..." }, saveButton { "Save" }, saveAsButton { "Save as..." };
-    TextButton undoButton { "Undo" }, redoButton { "Redo" }, fitButton { "Zoom to fit" };
+    EditorButton newButton { "New" }, openButton { "Open..." }, saveButton { "Save" }, saveAsButton { "Save as..." };
+    EditorButton undoButton { "Undo" }, redoButton { "Redo" }, fitButton { "Zoom to fit" };
     Label durationLabel { {}, "Duration (s)" }, probeLabel { {}, "Probe" }, repeatLabel { {}, "Repeats" };
     TextEditor durationEditor, repeatEditor;
     ComboBox probeBox;
     Label usageLabel;
-    TextButton exportButton { "Export .bin..." }, uploadButton { "Upload to board" };
+    EditorButton exportButton { "Export .bin..." };
+    EditorButton uploadButton { "Upload to board", EditorButton::Style::Accent };
 
     ProbePanel probePanel;
     TimelineView timeline;
     BlockInspector inspector;
     Label statusLabel;
+    TooltipWindow tooltips { this, 600 };
 
     std::unique_ptr<FileChooser> chooser;
 
@@ -76,7 +85,10 @@ private:
 class PatternEditorWindow : public DocumentWindow
 {
 public:
-    PatternEditorWindow (ProbeMapping initialProbe, std::function<void (const File&, int)> onUpload);
+    /** host: the plugin component opening the editor; the window uses its look
+        and feel and opens on the same screen. */
+    PatternEditorWindow (Component& host, ProbeMapping initialProbe, std::function<void (const File&, int)> onUpload);
+    ~PatternEditorWindow() override;
 
     void closeButtonPressed() override { setVisible (false); }
 

@@ -161,7 +161,7 @@ const std::vector<Preset>& presets()
 
 BlockInspector::BlockInspector (PatternDocument& d) : doc (d)
 {
-    title.setFont (FontOptions (13.0f, Font::bold));
+    title.setFont (FontOptions (14.0f, Font::bold));
     addAndMakeVisible (title);
 
     presetBox.setTextWhenNothingSelected ("Presets...");
@@ -209,7 +209,7 @@ BlockInspector::BlockInspector (PatternDocument& d) : doc (d)
 
     for (auto* l : { &startLabel, &lengthLabel, &fadeInLabel, &fadeOutLabel, &pointsLabel })
     {
-        l->setFont (FontOptions (12.0f));
+        l->setFont (FontOptions (13.0f));
         l->setJustificationType (Justification::centredRight);
         addAndMakeVisible (l);
     }
@@ -236,7 +236,7 @@ BlockInspector::BlockInspector (PatternDocument& d) : doc (d)
 
     for (int i = 0; i < 5; ++i)
     {
-        paramLabels[(std::size_t) i].setFont (FontOptions (12.0f));
+        paramLabels[(std::size_t) i].setFont (FontOptions (13.0f));
         paramLabels[(std::size_t) i].setJustificationType (Justification::centredRight);
         addAndMakeVisible (paramLabels[(std::size_t) i]);
         auto& ed = paramEditors[(std::size_t) i];
@@ -245,7 +245,7 @@ BlockInspector::BlockInspector (PatternDocument& d) : doc (d)
         addAndMakeVisible (ed);
     }
 
-    guide.setFont (FontOptions (12.0f));
+    guide.setFont (FontOptions (13.0f));
     guide.setJustificationType (Justification::centredLeft);
     addAndMakeVisible (guide);
 
@@ -275,7 +275,7 @@ BlockInspector::BlockInspector (PatternDocument& d) : doc (d)
 
     importButton.onClick = [this] { importCsv(); };
     addAndMakeVisible (importButton);
-    samplesInfo.setFont (FontOptions (12.0f));
+    samplesInfo.setFont (FontOptions (13.0f));
     addAndMakeVisible (samplesInfo);
 
     formulaEditor.setFont (FontOptions (Font::getDefaultMonospacedFontName(), 14.0f, Font::plain));
@@ -288,7 +288,7 @@ BlockInspector::BlockInspector (PatternDocument& d) : doc (d)
         formulaHelp.setText (ok ? "Press Enter to apply." : String (error), dontSendNotification);
     };
     addAndMakeVisible (formulaEditor);
-    formulaHelp.setFont (FontOptions (12.0f));
+    formulaHelp.setFont (FontOptions (13.0f));
     addAndMakeVisible (formulaHelp);
 
     unlinkButton.setTooltip ("Make the selected blocks independent so they can be edited separately");
@@ -361,7 +361,7 @@ void BlockInspector::refresh()
 
     const auto n = doc.selectedBlocks().size();
     if (n == 0)
-        title.setText ("New block settings", dontSendNotification);
+        title.setText ("New block settings  (used by \"Add blocks\" and double-click)", dontSendNotification);
     else
         title.setText (String ((int) n) + (n == 1 ? " block selected" : " blocks selected"), dontSendNotification);
 
@@ -413,8 +413,8 @@ void BlockInspector::refresh()
                        dontSendNotification);
     }
 
-    unlinkButton.setEnabled (! editingTemplate());
-    deleteButton.setEnabled (! editingTemplate());
+    unlinkButton.setActive (! editingTemplate());
+    deleteButton.setActive (! editingTemplate());
 
     layoutForKind();
 }
@@ -447,40 +447,48 @@ void BlockInspector::layoutForKind()
 
 void BlockInspector::paint (Graphics& g)
 {
-    g.fillAll (findColour (ThemeColours::widgetBackground));
+    g.fillAll (findColour (ThemeColours::componentBackground));
     g.setColour (findColour (ThemeColours::outline));
-    g.drawHorizontalLine (0, 0.0f, (float) getWidth());
+    g.drawHorizontalLine (title.getBottom() + 1, 10.0f, (float) getWidth() - 10.0f);
 }
 
 void BlockInspector::resized()
 {
-    auto b = getLocalBounds().reduced (8, 6);
+    auto b = getLocalBounds().reduced (10, 6);
+    const int rowH = 28;
 
-    auto row1 = b.removeFromTop (24);
-    title.setBounds (row1.removeFromLeft (150));
-    presetBox.setBounds (row1.removeFromLeft (260).reduced (2, 0));
-    kindBox.setBounds (row1.removeFromLeft (130).reduced (2, 0));
+    // header: what is being edited
+    title.setBounds (b.removeFromTop (22));
+    b.removeFromTop (8);
+
+    // waveform choice
+    auto row1 = b.removeFromTop (rowH);
+    presetBox.setBounds (row1.removeFromLeft (jmax (220, row1.getWidth() / 4)).reduced (3, 0));
+    kindBox.setBounds (row1.removeFromLeft (160).reduced (3, 0));
     if (typeBox.isVisible())
-        typeBox.setBounds (row1.removeFromLeft (150).reduced (2, 0));
-    labelEditor.setBounds (row1.reduced (2, 0));
+        typeBox.setBounds (row1.removeFromLeft (190).reduced (3, 0));
+    labelEditor.setBounds (row1.reduced (3, 0));
     b.removeFromTop (6);
 
-    auto row2 = b.removeFromTop (24);
+    // timing, plus block actions on the right
+    auto row2 = b.removeFromTop (rowH);
+    deleteButton.setBounds (row2.removeFromRight (90).reduced (3, 0));
+    unlinkButton.setBounds (row2.removeFromRight (90).reduced (3, 0));
     auto pair = [&row2] (Label& l, Component& c, int lw, int cw)
     {
         l.setBounds (row2.removeFromLeft (lw));
-        c.setBounds (row2.removeFromLeft (cw).reduced (2, 0));
+        c.setBounds (row2.removeFromLeft (cw).reduced (3, 0));
     };
-    pair (startLabel, startEditor, 70, 80);
-    pair (lengthLabel, lengthEditor, 80, 80);
-    fitButton.setBounds (row2.removeFromLeft (44).reduced (2, 0));
-    pair (fadeInLabel, fadeInEditor, 86, 64);
-    pair (fadeOutLabel, fadeOutEditor, 92, 64);
-    deleteButton.setBounds (row2.removeFromRight (70).reduced (2, 0));
-    unlinkButton.setBounds (row2.removeFromRight (70).reduced (2, 0));
+    pair (startLabel, startEditor, 80, 90);
+    pair (lengthLabel, lengthEditor, 92, 90);
+    fitButton.setBounds (row2.removeFromLeft (54).reduced (3, 0));
+    row2.removeFromLeft (10);
+    pair (fadeInLabel, fadeInEditor, 96, 76);
+    pair (fadeOutLabel, fadeOutEditor, 104, 76);
     b.removeFromTop (6);
 
-    auto row3 = b.removeFromTop (24);
+    // waveform parameters
+    auto row3 = b.removeFromTop (rowH);
     const WaveKind k = shown().wave.kind;
 
     if (k == WaveKind::Builtin)
@@ -489,30 +497,30 @@ void BlockInspector::resized()
         {
             if (! paramEditors[(std::size_t) i].isVisible())
                 continue;
-            paramLabels[(std::size_t) i].setBounds (row3.removeFromLeft (118));
-            paramEditors[(std::size_t) i].setBounds (row3.removeFromLeft (70).reduced (2, 0));
+            paramLabels[(std::size_t) i].setBounds (row3.removeFromLeft (150));
+            paramEditors[(std::size_t) i].setBounds (row3.removeFromLeft (90).reduced (3, 0));
         }
     }
     else if (k == WaveKind::Breakpoints)
     {
-        pointsLabel.setBounds (row3.removeFromLeft (110));
-        repeatToggle.setBounds (row3.removeFromRight (80));
-        interpBox.setBounds (row3.removeFromRight (100).reduced (2, 0));
-        pointsEditor.setBounds (row3.reduced (2, 0));
+        pointsLabel.setBounds (row3.removeFromLeft (120));
+        repeatToggle.setBounds (row3.removeFromRight (90));
+        interpBox.setBounds (row3.removeFromRight (120).reduced (3, 0));
+        pointsEditor.setBounds (row3.reduced (3, 0));
     }
     else if (k == WaveKind::Samples)
     {
-        importButton.setBounds (row3.removeFromLeft (120).reduced (2, 0));
-        repeatToggle.setBounds (row3.removeFromLeft (90));
+        importButton.setBounds (row3.removeFromLeft (140).reduced (3, 0));
+        repeatToggle.setBounds (row3.removeFromLeft (100));
         samplesInfo.setBounds (row3);
     }
     else
     {
-        formulaEditor.setBounds (row3.reduced (2, 0));
+        formulaEditor.setBounds (row3.reduced (3, 0));
     }
 
     b.removeFromTop (4);
-    auto row4 = b.removeFromTop (20);
+    auto row4 = b.removeFromTop (22);
     guide.setBounds (row4);
     formulaHelp.setBounds (row4);
 }

@@ -62,7 +62,7 @@ PatternEditorComponent::PatternEditorComponent (ProbeMapping initialProbe, std::
 
     for (auto* l : { &durationLabel, &probeLabel, &repeatLabel })
     {
-        l->setFont (FontOptions (12.0f));
+        l->setFont (FontOptions (13.0f));
         l->setJustificationType (Justification::centredRight);
         addAndMakeVisible (l);
     }
@@ -102,14 +102,14 @@ PatternEditorComponent::PatternEditorComponent (ProbeMapping initialProbe, std::
     };
     addAndMakeVisible (probeBox);
 
-    usageLabel.setFont (FontOptions (12.0f));
+    usageLabel.setFont (FontOptions (13.0f));
     addAndMakeVisible (usageLabel);
 
     addAndMakeVisible (probePanel);
     addAndMakeVisible (timeline);
     addAndMakeVisible (inspector);
 
-    statusLabel.setFont (FontOptions (12.0f));
+    statusLabel.setFont (FontOptions (13.0f));
     addAndMakeVisible (statusLabel);
 
     timeline.onLaneNameClicked = [this] (int led)
@@ -151,8 +151,8 @@ void PatternEditorComponent::refresh()
         repeatEditor.setText (String (p.repeatCount), false);
     probeBox.setSelectedId ((int) p.probe, dontSendNotification);
 
-    undoButton.setEnabled (doc.canUndo());
-    redoButton.setEnabled (doc.canRedo());
+    undoButton.setActive (doc.canUndo());
+    redoButton.setActive (doc.canRedo());
 
     const double maxSeconds = (double) kMaxSamples / kSampleRateHz;
     const double mb = encodedSizeBytes (p) / (1024.0 * 1024.0);
@@ -186,34 +186,61 @@ void PatternEditorComponent::refresh()
 void PatternEditorComponent::paint (Graphics& g)
 {
     g.fillAll (findColour (ThemeColours::componentBackground));
+
+    // toolbar and settings bands, with dividers around the panels
+    auto b = getLocalBounds();
+    g.setColour (findColour (ThemeColours::widgetBackground));
+    g.fillRect (b.removeFromTop (kToolbarHeight + kSettingsHeight));
+
+    g.setColour (findColour (ThemeColours::outline));
+    g.drawHorizontalLine (kToolbarHeight, 8.0f, (float) getWidth() - 8.0f);
+    g.drawHorizontalLine (kToolbarHeight + kSettingsHeight, 0.0f, (float) getWidth());
+    g.drawVerticalLine (probePanel.getRight(), (float) probePanel.getY(), (float) probePanel.getBottom());
+    g.drawHorizontalLine (inspector.getY(), 0.0f, (float) getWidth());
+    g.drawHorizontalLine (statusLabel.getY() - 1, 0.0f, (float) getWidth());
 }
 
 void PatternEditorComponent::resized()
 {
     auto b = getLocalBounds();
 
-    auto top = b.removeFromTop (36).reduced (6, 6);
-    for (auto* btn : { &newButton, &openButton, &saveButton, &saveAsButton })
-        btn->setBounds (top.removeFromLeft (74).reduced (2, 0));
-    top.removeFromLeft (8);
-    undoButton.setBounds (top.removeFromLeft (56).reduced (2, 0));
-    redoButton.setBounds (top.removeFromLeft (56).reduced (2, 0));
-    fitButton.setBounds (top.removeFromLeft (90).reduced (2, 0));
-    top.removeFromLeft (8);
-    durationLabel.setBounds (top.removeFromLeft (80));
-    durationEditor.setBounds (top.removeFromLeft (64).reduced (2, 0));
-    probeLabel.setBounds (top.removeFromLeft (44));
-    probeBox.setBounds (top.removeFromLeft (200).reduced (2, 0));
-    repeatLabel.setBounds (top.removeFromLeft (58));
-    repeatEditor.setBounds (top.removeFromLeft (50).reduced (2, 0));
-    uploadButton.setBounds (top.removeFromRight (124).reduced (2, 0));
-    exportButton.setBounds (top.removeFromRight (104).reduced (2, 0));
-    usageLabel.setBounds (top.withTrimmedLeft (8));
+    // toolbar: file and edit actions on the left, output on the right
+    auto bar = b.removeFromTop (kToolbarHeight).reduced (8, 7);
+    auto take = [&bar] (int w, bool right)
+    {
+        auto r = right ? bar.removeFromRight (w) : bar.removeFromLeft (w);
+        return r.reduced (3, 0);
+    };
 
-    statusLabel.setBounds (b.removeFromBottom (22).reduced (8, 0));
-    inspector.setBounds (b.removeFromBottom (124));
-    probePanel.setBounds (b.removeFromLeft (230));
-    timeline.setBounds (b);
+    newButton.setBounds (take (70, false));
+    openButton.setBounds (take (80, false));
+    saveButton.setBounds (take (70, false));
+    saveAsButton.setBounds (take (90, false));
+    bar.removeFromLeft (16);
+    undoButton.setBounds (take (64, false));
+    redoButton.setBounds (take (64, false));
+    fitButton.setBounds (take (104, false));
+
+    uploadButton.setBounds (take (160, true));
+    exportButton.setBounds (take (130, true));
+
+    // pattern settings and flash usage
+    auto settings = b.removeFromTop (kSettingsHeight).reduced (8, 6);
+    durationLabel.setBounds (settings.removeFromLeft (90));
+    durationEditor.setBounds (settings.removeFromLeft (80).reduced (3, 0));
+    settings.removeFromLeft (12);
+    probeLabel.setBounds (settings.removeFromLeft (50));
+    probeBox.setBounds (settings.removeFromLeft (230).reduced (3, 0));
+    settings.removeFromLeft (12);
+    repeatLabel.setBounds (settings.removeFromLeft (64));
+    repeatEditor.setBounds (settings.removeFromLeft (64).reduced (3, 0));
+    settings.removeFromLeft (16);
+    usageLabel.setBounds (settings);
+
+    statusLabel.setBounds (b.removeFromBottom (kStatusHeight).reduced (10, 0));
+    inspector.setBounds (b.removeFromBottom (kInspectorHeight).withTrimmedTop (1));
+    probePanel.setBounds (b.removeFromLeft (kProbePanelWidth));
+    timeline.setBounds (b.withTrimmedLeft (1));
 }
 
 bool PatternEditorComponent::keyPressed (const KeyPress& key)
@@ -410,17 +437,32 @@ void PatternEditorComponent::upload()
 
 //==============================================================================
 
-PatternEditorWindow::PatternEditorWindow (ProbeMapping initialProbe, std::function<void (const File&, int)> onUpload)
-    : DocumentWindow ("HectoSTAR pattern editor", Colours::darkgrey, DocumentWindow::allButtons)
+PatternEditorWindow::PatternEditorWindow (Component& host, ProbeMapping initialProbe, std::function<void (const File&, int)> onUpload)
+    : DocumentWindow ("HectoSTAR pattern editor", host.findColour (ThemeColours::componentBackground), DocumentWindow::allButtons)
 {
+    // same theme as the main Open Ephys window
+    setLookAndFeel (&host.getLookAndFeel());
+
     editor = new PatternEditorComponent (initialProbe, std::move (onUpload));
     editor->onTitleChanged = [this] { setName ("HectoSTAR pattern editor - " + editor->documentTitle()); };
     setContentOwned (editor, false);
     setUsingNativeTitleBar (true);
     setResizable (true, false);
-    setResizeLimits (900, 560, 4000, 3000);
-    centreWithSize (1280, 780);
+
+    // fill most of the screen Open Ephys is on (the timeline wants width, the lanes height)
+    juce::Rectangle<int> screen (0, 0, 1600, 1000);
+    if (const auto* display = Desktop::getInstance().getDisplays().getDisplayForRect (host.getScreenBounds()))
+        screen = display->userArea;
+
+    setResizeLimits (jmin (960, screen.getWidth()), jmin (600, screen.getHeight()), 10000, 10000);
+    setBounds (screen.withSizeKeepingCentre ((int) (screen.getWidth() * 0.92), (int) (screen.getHeight() * 0.92)));
     setName ("HectoSTAR pattern editor - " + editor->documentTitle());
+}
+
+PatternEditorWindow::~PatternEditorWindow()
+{
+    clearContentComponent();
+    setLookAndFeel (nullptr);
 }
 
 } // namespace PatternEditor
