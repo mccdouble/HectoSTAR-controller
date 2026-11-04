@@ -47,7 +47,7 @@ public:
 
     static constexpr int kRulerHeight = 24;
     static constexpr int kLaneHeight = 44;
-    static constexpr int kNameWidth = 78;
+    static constexpr int kNameWidth = 112;
     static constexpr int kScrollSize = 12;
 
 private:
@@ -58,6 +58,7 @@ private:
     double pxPerSec = 600.0;
     double viewStart = 0.0;
     double scrollY = 0.0;
+    bool fittedOnce = false;
 
     enum class Drag
     {

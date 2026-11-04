@@ -31,12 +31,21 @@ public:
     void paint (Graphics& g) override;
     void resized() override;
 
+    /** Height needed to show every field at this width (fields wrap when narrow). */
+    int preferredHeight (int width);
+
+    /** Called when the fields shown change (e.g. another waveform kind). */
+    std::function<void()> onLayoutChanged;
+
 private:
     PatternDocument& doc;
 
     Label title;
     ComboBox presetBox, kindBox, typeBox;
+    Label labelCaption { {}, "Label" };
     TextEditor labelEditor;
+    int headerBottom = 0;
+    int lastPreferredHeight = 0;
 
     Label startLabel { {}, "Start (ms)" }, lengthLabel { {}, "Length (ms)" }, fadeInLabel { {}, "Fade in (ms)" },
         fadeOutLabel { {}, "Fade out (ms)" };
@@ -67,6 +76,7 @@ private:
     void changeListenerCallback (ChangeBroadcaster*) override { refresh(); }
     void refresh();
     void layoutForKind();
+    int doLayout (int width, bool apply);
 
     /** The block shown in the fields: the first selected block, or the new-block template. */
     const Block& shown() const;

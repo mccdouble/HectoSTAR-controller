@@ -43,8 +43,7 @@ private:
     static constexpr int kToolbarHeight = 44;
     static constexpr int kSettingsHeight = 40;
     static constexpr int kStatusHeight = 26;
-    static constexpr int kInspectorHeight = 178;
-    static constexpr int kProbePanelWidth = 290;
+    static constexpr int kProbePanelWidth = 300;
 
     PatternDocument doc;
     std::function<void (const File&, int)> uploadCallback;
@@ -59,6 +58,7 @@ private:
     EditorButton uploadButton { "Upload to board", EditorButton::Style::Accent };
 
     ProbePanel probePanel;
+    SequenceBar sequenceBar;
     TimelineView timeline;
     BlockInspector inspector;
     Label statusLabel;

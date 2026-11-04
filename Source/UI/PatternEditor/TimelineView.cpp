@@ -150,6 +150,14 @@ void TimelineView::resized()
     auto b = getLocalBounds();
     hScroll.setBounds (b.removeFromBottom (kScrollSize).withTrimmedLeft (kNameWidth).withTrimmedRight (kScrollSize));
     vScroll.setBounds (b.removeFromRight (kScrollSize).withTrimmedTop (kRulerHeight));
+
+    // show the whole pattern the first time there is room for it
+    if (! fittedOnce && lanesArea().getWidth() > 50)
+    {
+        fittedOnce = true;
+        zoomToFit();
+        return;
+    }
     updateScrollBars();
 }
 
@@ -184,10 +192,23 @@ void TimelineView::paint (Graphics& g)
 
     if (leds.empty())
     {
-        g.setColour (findColour (ThemeColours::defaultText).withAlpha (0.6f));
-        g.setFont (FontOptions (14.0f));
-        g.drawFittedText ("Select LEDs on the probe map, then use \"Add blocks\" (or double-click a lane).",
-                          area.reduced (20), Justification::centred, 3);
+        // getting-started guide
+        const auto box = area.withSizeKeepingCentre (jmin (520, area.getWidth() - 40), 150).toFloat();
+        g.setColour (findColour (ThemeColours::widgetBackground));
+        g.fillRoundedRectangle (box, 6.0f);
+        g.setColour (findColour (ThemeColours::outline));
+        g.drawRoundedRectangle (box, 6.0f, 1.0f);
+
+        auto lines = box.reduced (20, 14).toNearestInt();
+        g.setColour (findColour (ThemeColours::defaultText));
+        g.setFont (FontOptions (15.0f, Font::bold));
+        g.drawText ("Build a pattern", lines.removeFromTop (26), Justification::centredLeft);
+        g.setFont (FontOptions (13.0f));
+        for (const char* step : { "1.  Select LEDs on the probe map (left).",
+                                  "2.  Set the waveform below, or pick a preset.",
+                                  "3.  Click \"Add blocks\" above, with an order and step to stagger them.",
+                                  "Or double-click a lane to drop a single block." })
+            g.drawText (step, lines.removeFromTop (24), Justification::centredLeft);
     }
 }
 
@@ -238,7 +259,7 @@ void TimelineView::paintLane (Graphics& g, int index, int led)
     g.drawText ("CH " + String (led), name.reduced (6, 0).withTrimmedBottom (kLaneHeight / 2), Justification::bottomLeft);
     g.setFont (FontOptions (11.0f));
     g.setColour (text.withAlpha (0.7f));
-    g.drawText ("Shank " + String (shankOf (led)) + ", row " + String (rowFromBottom (led) + 1), name.reduced (6, 0).withTrimmedTop (kLaneHeight / 2), Justification::topLeft);
+    g.drawText ("S" + String (shankOf (led)) + " row " + String (rowFromBottom (led) + 1), name.reduced (6, 0).withTrimmedTop (kLaneHeight / 2), Justification::topLeft);
 
     g.setColour (findColour (ThemeColours::outline).withAlpha (0.6f));
     g.drawHorizontalLine (top + kLaneHeight - 1, 0.0f, (float) lane.getRight());

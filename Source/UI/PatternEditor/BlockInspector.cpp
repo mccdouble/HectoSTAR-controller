@@ -197,7 +197,10 @@ BlockInspector::BlockInspector (PatternDocument& d) : doc (d)
     };
     addAndMakeVisible (typeBox);
 
-    labelEditor.setTextToShowWhenEmpty ("Label", Colours::grey);
+    labelCaption.setFont (FontOptions (13.0f));
+    labelCaption.setJustificationType (Justification::centredRight);
+    addAndMakeVisible (labelCaption);
+    labelEditor.setTextToShowWhenEmpty ("shown on the blocks", Colours::grey);
     labelEditor.onReturnKey = labelEditor.onFocusLost = [this]
     {
         if (updating)
@@ -361,7 +364,7 @@ void BlockInspector::refresh()
 
     const auto n = doc.selectedBlocks().size();
     if (n == 0)
-        title.setText ("New block settings  (used by \"Add blocks\" and double-click)", dontSendNotification);
+        title.setText ("New block settings", dontSendNotification);
     else
         title.setText (String ((int) n) + (n == 1 ? " block selected" : " blocks selected"), dontSendNotification);
 
@@ -443,86 +446,136 @@ void BlockInspector::layoutForKind()
     formulaHelp.setVisible (k == WaveKind::Formula);
 
     resized();
+    repaint();
+
+    const int h = getWidth() > 0 ? preferredHeight (getWidth()) : 0;
+    if (h != lastPreferredHeight)
+    {
+        lastPreferredHeight = h;
+        if (onLayoutChanged)
+            onLayoutChanged();
+    }
 }
 
 void BlockInspector::paint (Graphics& g)
 {
     g.fillAll (findColour (ThemeColours::componentBackground));
     g.setColour (findColour (ThemeColours::outline));
-    g.drawHorizontalLine (title.getBottom() + 1, 10.0f, (float) getWidth() - 10.0f);
+    g.drawHorizontalLine (headerBottom, 10.0f, (float) getWidth() - 10.0f);
+}
+
+int BlockInspector::preferredHeight (int width)
+{
+    return doLayout (width, false);
 }
 
 void BlockInspector::resized()
 {
-    auto b = getLocalBounds().reduced (10, 6);
-    const int rowH = 28;
+    doLayout (getWidth(), true);
+}
 
-    // header: what is being edited
-    title.setBounds (b.removeFromTop (22));
-    b.removeFromTop (8);
+int BlockInspector::doLayout (int width, bool apply)
+{
+    const int rowH = 26;
+    const int gap = 6;
+    const int x0 = 10;
+    const int x1 = width - 10;
+    int y = 6;
 
-    // waveform choice
-    auto row1 = b.removeFromTop (rowH);
-    presetBox.setBounds (row1.removeFromLeft (jmax (220, row1.getWidth() / 4)).reduced (3, 0));
-    kindBox.setBounds (row1.removeFromLeft (160).reduced (3, 0));
-    if (typeBox.isVisible())
-        typeBox.setBounds (row1.removeFromLeft (190).reduced (3, 0));
-    labelEditor.setBounds (row1.reduced (3, 0));
-    b.removeFromTop (6);
-
-    // timing, plus block actions on the right
-    auto row2 = b.removeFromTop (rowH);
-    deleteButton.setBounds (row2.removeFromRight (90).reduced (3, 0));
-    unlinkButton.setBounds (row2.removeFromRight (90).reduced (3, 0));
-    auto pair = [&row2] (Label& l, Component& c, int lw, int cw)
+    auto place = [apply] (Component& c, juce::Rectangle<int> r)
     {
-        l.setBounds (row2.removeFromLeft (lw));
-        c.setBounds (row2.removeFromLeft (cw).reduced (3, 0));
+        if (apply)
+            c.setBounds (r);
     };
-    pair (startLabel, startEditor, 80, 90);
-    pair (lengthLabel, lengthEditor, 92, 90);
-    fitButton.setBounds (row2.removeFromLeft (54).reduced (3, 0));
-    row2.removeFromLeft (10);
-    pair (fadeInLabel, fadeInEditor, 96, 76);
-    pair (fadeOutLabel, fadeOutEditor, 104, 76);
-    b.removeFromTop (6);
 
-    // waveform parameters
-    auto row3 = b.removeFromTop (rowH);
-    const WaveKind k = shown().wave.kind;
+    // header: what is being edited, its label, block actions
+    {
+        juce::Rectangle<int> row (x0, y, x1 - x0, rowH);
+        place (deleteButton, row.removeFromRight (84).reduced (3, 0));
+        place (unlinkButton, row.removeFromRight (84).reduced (3, 0));
+        const int titleW = jmin (textWidth (title.getText(), 14.0f) + 20, row.getWidth() / 2);
+        place (title, row.removeFromLeft (titleW));
+        place (labelCaption, row.removeFromLeft (textWidth (labelCaption.getText()) + 10));
+        place (labelEditor, row.withWidth (jmin (row.getWidth(), 360)).reduced (3, 0));
+        y += rowH + 4;
+        headerBottom = y;
+        y += gap;
+    }
+
+    // items flow left to right and wrap onto new rows when the panel is narrow
+    struct Item
+    {
+        Label* label;
+        Component* field;
+        int fieldWidth;
+    };
+
+    auto flow = [&] (const std::vector<Item>& items)
+    {
+        int x = x0;
+        for (const auto& it : items)
+        {
+            const int labelW = it.label != nullptr ? textWidth (it.label->getText()) + 10 : 0;
+            const int w = labelW + it.fieldWidth;
+            if (x > x0 && x + w > x1)
+            {
+                x = x0;
+                y += rowH + gap;
+            }
+            if (it.label != nullptr)
+                place (*it.label, { x, y, labelW, rowH });
+            place (*it.field, juce::Rectangle<int> (x + labelW, y, jmin (it.fieldWidth, x1 - x - labelW), rowH).reduced (3, 0));
+            x += w + 14;
+        }
+        y += rowH + gap;
+    };
+
+    const Block& b = shown();
+    const WaveKind k = b.wave.kind;
+
+    std::vector<Item> wave = { { nullptr, &presetBox, 250 }, { nullptr, &kindBox, 160 } };
+    if (k == WaveKind::Builtin)
+        wave.push_back ({ nullptr, &typeBox, 200 });
+    flow (wave);
+
+    flow ({ { &startLabel, &startEditor, 84 },
+            { &lengthLabel, &lengthEditor, 84 },
+            { nullptr, &fitButton, 56 },
+            { &fadeInLabel, &fadeInEditor, 70 },
+            { &fadeOutLabel, &fadeOutEditor, 70 } });
 
     if (k == WaveKind::Builtin)
     {
+        std::vector<Item> params;
         for (int i = 0; i < 5; ++i)
-        {
-            if (! paramEditors[(std::size_t) i].isVisible())
-                continue;
-            paramLabels[(std::size_t) i].setBounds (row3.removeFromLeft (150));
-            paramEditors[(std::size_t) i].setBounds (row3.removeFromLeft (90).reduced (3, 0));
-        }
+            if (paramEditors[(std::size_t) i].isVisible())
+                params.push_back ({ &paramLabels[(std::size_t) i], &paramEditors[(std::size_t) i], 84 });
+        if (! params.empty())
+            flow (params);
     }
     else if (k == WaveKind::Breakpoints)
     {
-        pointsLabel.setBounds (row3.removeFromLeft (120));
-        repeatToggle.setBounds (row3.removeFromRight (90));
-        interpBox.setBounds (row3.removeFromRight (120).reduced (3, 0));
-        pointsEditor.setBounds (row3.reduced (3, 0));
+        flow ({ { &pointsLabel, &pointsEditor, jmax (220, jmin (520, x1 - x0 - 380)) },
+                { nullptr, &interpBox, 120 },
+                { nullptr, &repeatToggle, 90 } });
     }
     else if (k == WaveKind::Samples)
     {
-        importButton.setBounds (row3.removeFromLeft (140).reduced (3, 0));
-        repeatToggle.setBounds (row3.removeFromLeft (100));
-        samplesInfo.setBounds (row3);
+        flow ({ { nullptr, &importButton, 140 },
+                { nullptr, &repeatToggle, 90 },
+                { nullptr, &samplesInfo, jmax (200, textWidth (samplesInfo.getText()) + 10) } });
     }
     else
     {
-        formulaEditor.setBounds (row3.reduced (3, 0));
+        flow ({ { nullptr, &formulaEditor, x1 - x0 } });
     }
 
-    b.removeFromTop (4);
-    auto row4 = b.removeFromTop (22);
-    guide.setBounds (row4);
-    formulaHelp.setBounds (row4);
+    // explanation / help / errors
+    place (guide, { x0, y - 2, x1 - x0, 20 });
+    place (formulaHelp, { x0, y - 2, x1 - x0, 20 });
+    y += 22;
+
+    return y + 4;
 }
 
 void BlockInspector::commitParam (int index)

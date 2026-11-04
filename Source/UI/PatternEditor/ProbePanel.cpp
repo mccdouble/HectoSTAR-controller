@@ -1,7 +1,7 @@
 /*
     ------------------------------------------------------------------
 
-    Pattern editor probe map and sequencing tools. See ProbePanel.h.
+    Pattern editor probe map and sequencing bar. See ProbePanel.h.
 
     ------------------------------------------------------------------
 */
@@ -18,9 +18,8 @@ std::vector<int> sequenceRanks (const std::vector<int>& leds, SequenceOrder orde
 {
     // key per LED; equal keys share a rank, ranks are dense in key order
     std::vector<int> keys;
-    for (std::size_t i = 0; i < leds.size(); ++i)
+    for (const int led : leds)
     {
-        const int led = leds[i];
         switch (order)
         {
             case SequenceOrder::Together: keys.push_back (0); break;
@@ -55,18 +54,18 @@ ProbeMap::~ProbeMap()
 
 juce::Rectangle<float> ProbeMap::cellBounds (int led) const
 {
-    const float header = 18.0f;
+    const float header = 20.0f;
     const float colW = getWidth() / 4.0f;
     const float rowH = (getHeight() - header) / 16.0f;
     const int col = shankOf (led) - 1;
     const int rowFromTop = 15 - rowFromBottom (led);
-    return { col * colW + 3.0f, header + rowFromTop * rowH + 1.5f, colW - 6.0f, rowH - 3.0f };
+    return { col * colW + 4.0f, header + rowFromTop * rowH + 2.0f, colW - 8.0f, rowH - 4.0f };
 }
 
 int ProbeMap::ledAt (Point<float> p) const
 {
     for (int led = 1; led <= kNumLeds; ++led)
-        if (cellBounds (led).expanded (1.5f).contains (p))
+        if (cellBounds (led).expanded (2.0f).contains (p))
             return led;
     return 0;
 }
@@ -80,12 +79,21 @@ void ProbeMap::paint (Graphics& g)
     for (int led : activeLeds (doc.pattern()))
         used.insert (led);
 
-    g.setFont (FontOptions (12.0f));
+    // shank outlines behind the LEDs
+    const float colW = getWidth() / 4.0f;
     for (int s = 0; s < 4; ++s)
     {
-        g.setColour (text.withAlpha (0.7f));
-        g.drawText ("Shank " + String (s + 1), juce::Rectangle<float> (s * getWidth() / 4.0f, 0, getWidth() / 4.0f, 16.0f), Justification::centred);
+        const juce::Rectangle<float> shank (s * colW + 1.0f, 20.0f, colW - 2.0f, getHeight() - 21.0f);
+        g.setColour (findColour (ThemeColours::widgetBackground));
+        g.fillRoundedRectangle (shank, 4.0f);
+
+        g.setColour (text.withAlpha (0.8f));
+        g.setFont (FontOptions (12.0f, Font::bold));
+        g.drawText ("S" + String (s + 1), juce::Rectangle<float> (s * colW, 0, colW, 18.0f), Justification::centred);
     }
+
+    const float rowH = (getHeight() - 20.0f) / 16.0f;
+    g.setFont (FontOptions (jlimit (10.0f, 13.0f, rowH * 0.55f)));
 
     for (int led = 1; led <= kNumLeds; ++led)
     {
@@ -93,10 +101,10 @@ void ProbeMap::paint (Graphics& g)
         const bool sel = doc.selectedLeds().count (led) > 0;
         const bool inUse = used.count (led) > 0;
 
-        g.setColour (sel ? accent : (inUse ? accent.withAlpha (0.3f) : findColour (ThemeColours::widgetBackground)));
+        g.setColour (sel ? accent : (inUse ? accent.withAlpha (0.35f) : findColour (ThemeColours::componentBackground)));
         g.fillRoundedRectangle (r, 3.0f);
-        g.setColour (findColour (ThemeColours::outline));
-        g.drawRoundedRectangle (r, 3.0f, 0.75f);
+        g.setColour (sel ? accent.darker (0.3f) : findColour (ThemeColours::outline));
+        g.drawRoundedRectangle (r, 3.0f, sel ? 1.5f : 0.75f);
 
         g.setColour (sel ? findColour (ThemeColours::highlightedText) : text);
         g.drawText (String (led), r, Justification::centred);
@@ -112,7 +120,6 @@ void ProbeMap::mouseDown (const MouseEvent& e)
     {
         if (! e.mods.isCommandDown() && ! e.mods.isShiftDown())
             doc.setSelectedLeds ({});
-        dragBase = doc.selectedLeds();
         return;
     }
 
@@ -123,7 +130,6 @@ void ProbeMap::mouseDown (const MouseEvent& e)
     else
         sel.insert (led);
 
-    dragBase = sel;
     doc.setSelectedLeds (sel);
 }
 
@@ -144,7 +150,7 @@ ProbePanel::ProbePanel (PatternDocument& d) : doc (d), map (d)
 {
     addAndMakeVisible (map);
 
-    for (auto* b : { &selectAll, &selectNone, &selectInUse, &addButton, &staggerButton })
+    for (auto* b : { &selectAll, &selectNone, &selectInUse })
         addAndMakeVisible (b);
 
     selectAll.onClick = [this]
@@ -160,10 +166,57 @@ ProbePanel::ProbePanel (PatternDocument& d) : doc (d), map (d)
         const auto leds = activeLeds (doc.pattern());
         doc.setSelectedLeds (std::set<int> (leds.begin(), leds.end()));
     };
+    selectInUse.setTooltip ("Select the LEDs that have blocks");
 
+    doc.addChangeListener (this);
+}
+
+ProbePanel::~ProbePanel()
+{
+    doc.removeChangeListener (this);
+}
+
+void ProbePanel::paint (Graphics& g)
+{
+    g.fillAll (findColour (ThemeColours::componentBackground));
+
+    const auto n = doc.selectedLeds().size();
+    drawSectionHeader (g, *this, header, n == 0 ? String ("Probe LEDs") : "Probe LEDs  (" + String ((int) n) + " selected)");
+
+    g.setColour (findColour (ThemeColours::defaultText).withAlpha (0.65f));
+    g.setFont (FontOptions (12.0f));
+    g.drawFittedText ("Click, Ctrl-click or drag to select. Tinted LEDs have blocks.", hint, Justification::centredLeft, 2);
+}
+
+void ProbePanel::resized()
+{
+    auto b = getLocalBounds().reduced (10, 8);
+
+    header = b.removeFromTop (22);
+    b.removeFromTop (6);
+
+    auto buttons = b.removeFromTop (28);
+    const int w = buttons.getWidth() / 3;
+    selectAll.setBounds (buttons.removeFromLeft (w).reduced (2, 0));
+    selectNone.setBounds (buttons.removeFromLeft (w).reduced (2, 0));
+    selectInUse.setBounds (buttons.reduced (2, 0));
+
+    b.removeFromTop (4);
+    hint = b.removeFromTop (32);
+    b.removeFromTop (4);
+
+    // the map takes the rest of the column; keep cells from getting stretched very tall
+    map.setBounds (b.withHeight (jmin (b.getHeight(), 20 + 16 * 40)));
+}
+
+//==============================================================================
+
+SequenceBar::SequenceBar (PatternDocument& d) : doc (d)
+{
     for (auto* l : { &orderLabel, &stepLabel, &startLabel })
     {
         l->setFont (FontOptions (13.0f));
+        l->setJustificationType (Justification::centredRight);
         addAndMakeVisible (l);
     }
 
@@ -173,10 +226,13 @@ ProbePanel::ProbePanel (PatternDocument& d) : doc (d), map (d)
     orderBox.addItem ("Top to bottom (by row)", 4);
     orderBox.addItem ("Shank by shank", 5);
     orderBox.setSelectedId (3, dontSendNotification);
+    orderBox.setTooltip ("The order the LEDs start in; LEDs with the same rank start together");
     addAndMakeVisible (orderBox);
 
     stepEditor.setText ("10");
     startEditor.setText ("0");
+    stepEditor.setTooltip ("Time between successive LEDs (ranks) in the order");
+    startEditor.setTooltip ("When the first LED starts");
     for (auto* t : { &stepEditor, &startEditor })
     {
         t->setInputRestrictions (12, "0123456789.");
@@ -188,65 +244,73 @@ ProbePanel::ProbePanel (PatternDocument& d) : doc (d), map (d)
     staggerButton.setTooltip ("Re-space the selected blocks by the step in this order, keeping the earliest start");
     addButton.onClick = [this] { addBlocks(); };
     staggerButton.onClick = [this] { staggerBlocks(); };
+    addAndMakeVisible (addButton);
+    addAndMakeVisible (staggerButton);
+
+    doc.addChangeListener (this);
+    refresh();
 }
 
-void ProbePanel::paint (Graphics& g)
+SequenceBar::~SequenceBar()
 {
-    g.fillAll (findColour (ThemeColours::componentBackground));
-    drawSectionHeader (g, *this, ledsHeader, "LEDs");
-    drawSectionHeader (g, *this, sequenceHeader, "Sequence");
-
-    g.setColour (findColour (ThemeColours::defaultText).withAlpha (0.65f));
-    g.setFont (FontOptions (12.0f));
-    g.drawFittedText ("Click, Ctrl-click or drag to select. Tinted LEDs have blocks.", hintArea, Justification::centredLeft, 2);
+    doc.removeChangeListener (this);
 }
 
-void ProbePanel::resized()
+void SequenceBar::refresh()
+{
+    const int leds = (int) doc.selectedLeds().size();
+    addButton.setLabel (leds == 0 ? String ("Add blocks (select LEDs)") : "Add blocks to " + String (leds) + (leds == 1 ? " LED" : " LEDs"));
+    addButton.setActive (leds > 0);
+    staggerButton.setActive (doc.selectedBlocks().size() > 1);
+    addButton.repaint();
+}
+
+int SequenceBar::controlsWidth() const
+{
+    // order + step + start
+    return 56 + 210 + 84 + 70 + 92 + 70 + 12;
+}
+
+int SequenceBar::preferredHeight (int width) const
+{
+    return (width - 20 >= controlsWidth() + 240 + 170) ? 44 : 78;
+}
+
+void SequenceBar::paint (Graphics& g)
+{
+    g.fillAll (findColour (ThemeColours::widgetBackground));
+    g.setColour (findColour (ThemeColours::outline));
+    g.drawHorizontalLine (getHeight() - 1, 0.0f, (float) getWidth());
+}
+
+void SequenceBar::resized()
 {
     auto b = getLocalBounds().reduced (10, 8);
+    const bool oneRow = getHeight() < 60;
 
-    // sequence tools at the bottom, fixed height
-    auto seq = b.removeFromBottom (22 + 4 * 30 + 2 * 34);
-    sequenceHeader = seq.removeFromTop (22);
-    seq.removeFromTop (6);
-    auto line = [&seq] (int h)
+    auto row = b.removeFromTop (28);
+    orderLabel.setBounds (row.removeFromLeft (56));
+    orderBox.setBounds (row.removeFromLeft (210).reduced (3, 0));
+    stepLabel.setBounds (row.removeFromLeft (84));
+    stepEditor.setBounds (row.removeFromLeft (70).reduced (3, 0));
+    startLabel.setBounds (row.removeFromLeft (92));
+    startEditor.setBounds (row.removeFromLeft (70).reduced (3, 0));
+
+    if (! oneRow)
     {
-        auto r = seq.removeFromTop (h);
-        seq.removeFromTop (4);
-        return r;
-    };
+        b.removeFromTop (6);
+        row = b.removeFromTop (28);
+    }
+    else
+    {
+        row.removeFromLeft (12);
+    }
 
-    auto r = line (26);
-    orderLabel.setBounds (r.removeFromLeft (80));
-    orderBox.setBounds (r);
-    r = line (26);
-    stepLabel.setBounds (r.removeFromLeft (80));
-    stepEditor.setBounds (r.removeFromLeft (80));
-    r = line (26);
-    startLabel.setBounds (r.removeFromLeft (80));
-    startEditor.setBounds (r.removeFromLeft (80));
-    addButton.setBounds (line (30));
-    staggerButton.setBounds (line (30));
-
-    b.removeFromBottom (10);
-
-    // LEDs: header, selection buttons, hint, map
-    ledsHeader = b.removeFromTop (22);
-    b.removeFromTop (6);
-    auto buttons = b.removeFromTop (28);
-    const int w = buttons.getWidth() / 3;
-    selectAll.setBounds (buttons.removeFromLeft (w).reduced (2, 0));
-    selectNone.setBounds (buttons.removeFromLeft (w).reduced (2, 0));
-    selectInUse.setBounds (buttons.reduced (2, 0));
-    b.removeFromTop (4);
-    hintArea = b.removeFromTop (30);
-
-    // keep cells from getting stretched tall on big screens
-    const int maxHeight = 18 + 16 * 30;
-    map.setBounds (b.withHeight (jmin (b.getHeight(), maxHeight)));
+    staggerButton.setBounds (row.removeFromRight (170).reduced (3, 0));
+    addButton.setBounds (row.removeFromRight (jmin (260, row.getWidth())).reduced (3, 0));
 }
 
-SequenceOrder ProbePanel::order() const
+SequenceOrder SequenceBar::order() const
 {
     switch (orderBox.getSelectedId())
     {
@@ -258,19 +322,16 @@ SequenceOrder ProbePanel::order() const
     }
 }
 
-double ProbePanel::stepSeconds() const
+double SequenceBar::stepSeconds() const
 {
     return std::max (0.0, stepEditor.getText().getDoubleValue() / 1000.0);
 }
 
-void ProbePanel::addBlocks()
+void SequenceBar::addBlocks()
 {
     const std::vector<int> leds (doc.selectedLeds().begin(), doc.selectedLeds().end());
     if (leds.empty())
-    {
-        AlertWindow::showMessageBoxAsync (AlertWindow::InfoIcon, "Add blocks", "Select one or more LEDs on the probe map first.");
         return;
-    }
 
     const auto ranks = sequenceRanks (leds, order());
     const double step = stepSeconds();
@@ -301,14 +362,11 @@ void ProbePanel::addBlocks()
     doc.setSelectedBlocks (added);
 }
 
-void ProbePanel::staggerBlocks()
+void SequenceBar::staggerBlocks()
 {
     const auto sel = doc.selectedBlocks();
-    if (sel.empty())
-    {
-        AlertWindow::showMessageBoxAsync (AlertWindow::InfoIcon, "Stagger", "Select the blocks to stagger on the timeline first.");
+    if (sel.size() < 2)
         return;
-    }
 
     // earliest selected block per LED; each LED's blocks shift together
     std::map<int, double> firstStart;

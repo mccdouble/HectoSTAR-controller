@@ -37,6 +37,7 @@ String formatSeconds (double s)
 PatternEditorComponent::PatternEditorComponent (ProbeMapping initialProbe, std::function<void (const File&, int)> onUpload)
     : uploadCallback (std::move (onUpload)),
       probePanel (doc),
+      sequenceBar (doc),
       timeline (doc),
       inspector (doc)
 {
@@ -73,9 +74,14 @@ PatternEditorComponent::PatternEditorComponent (ProbeMapping initialProbe, std::
     {
         const double v = durationEditor.getText().getDoubleValue();
         if (v > 0 && v != doc.pattern().duration)
+        {
             doc.modify ([v] (Pattern& p) { p.duration = v; });
+            timeline.zoomToFit();
+        }
         else
+        {
             refresh();
+        }
     };
     addAndMakeVisible (durationEditor);
 
@@ -106,8 +112,10 @@ PatternEditorComponent::PatternEditorComponent (ProbeMapping initialProbe, std::
     addAndMakeVisible (usageLabel);
 
     addAndMakeVisible (probePanel);
+    addAndMakeVisible (sequenceBar);
     addAndMakeVisible (timeline);
     addAndMakeVisible (inspector);
+    inspector.onLayoutChanged = [this] { resized(); };
 
     statusLabel.setFont (FontOptions (13.0f));
     addAndMakeVisible (statusLabel);
@@ -188,15 +196,14 @@ void PatternEditorComponent::paint (Graphics& g)
     g.fillAll (findColour (ThemeColours::componentBackground));
 
     // toolbar and settings bands, with dividers around the panels
-    auto b = getLocalBounds();
     g.setColour (findColour (ThemeColours::widgetBackground));
-    g.fillRect (b.removeFromTop (kToolbarHeight + kSettingsHeight));
+    g.fillRect (0, 0, getWidth(), kToolbarHeight + kSettingsHeight);
 
     g.setColour (findColour (ThemeColours::outline));
     g.drawHorizontalLine (kToolbarHeight, 8.0f, (float) getWidth() - 8.0f);
     g.drawHorizontalLine (kToolbarHeight + kSettingsHeight, 0.0f, (float) getWidth());
     g.drawVerticalLine (probePanel.getRight(), (float) probePanel.getY(), (float) probePanel.getBottom());
-    g.drawHorizontalLine (inspector.getY(), 0.0f, (float) getWidth());
+    g.drawHorizontalLine (inspector.getY(), (float) inspector.getX(), (float) getWidth());
     g.drawHorizontalLine (statusLabel.getY() - 1, 0.0f, (float) getWidth());
 }
 
@@ -213,34 +220,41 @@ void PatternEditorComponent::resized()
     };
 
     newButton.setBounds (take (70, false));
-    openButton.setBounds (take (80, false));
+    openButton.setBounds (take (90, false));
     saveButton.setBounds (take (70, false));
-    saveAsButton.setBounds (take (90, false));
+    saveAsButton.setBounds (take (104, false));
     bar.removeFromLeft (16);
-    undoButton.setBounds (take (64, false));
-    redoButton.setBounds (take (64, false));
-    fitButton.setBounds (take (104, false));
+    undoButton.setBounds (take (66, false));
+    redoButton.setBounds (take (66, false));
+    fitButton.setBounds (take (116, false));
 
-    uploadButton.setBounds (take (160, true));
-    exportButton.setBounds (take (130, true));
+    uploadButton.setBounds (take (170, true));
+    exportButton.setBounds (take (140, true));
 
     // pattern settings and flash usage
     auto settings = b.removeFromTop (kSettingsHeight).reduced (8, 6);
-    durationLabel.setBounds (settings.removeFromLeft (90));
+    durationLabel.setBounds (settings.removeFromLeft (textWidth (durationLabel.getText()) + 12));
     durationEditor.setBounds (settings.removeFromLeft (80).reduced (3, 0));
-    settings.removeFromLeft (12);
-    probeLabel.setBounds (settings.removeFromLeft (50));
-    probeBox.setBounds (settings.removeFromLeft (230).reduced (3, 0));
-    settings.removeFromLeft (12);
-    repeatLabel.setBounds (settings.removeFromLeft (64));
+    settings.removeFromLeft (14);
+    probeLabel.setBounds (settings.removeFromLeft (textWidth (probeLabel.getText()) + 12));
+    probeBox.setBounds (settings.removeFromLeft (240).reduced (3, 0));
+    settings.removeFromLeft (14);
+    repeatLabel.setBounds (settings.removeFromLeft (textWidth (repeatLabel.getText()) + 12));
     repeatEditor.setBounds (settings.removeFromLeft (64).reduced (3, 0));
-    settings.removeFromLeft (16);
+    settings.removeFromLeft (18);
     usageLabel.setBounds (settings);
 
     statusLabel.setBounds (b.removeFromBottom (kStatusHeight).reduced (10, 0));
-    inspector.setBounds (b.removeFromBottom (kInspectorHeight).withTrimmedTop (1));
+
+    // left: probe map, full height
     probePanel.setBounds (b.removeFromLeft (kProbePanelWidth));
-    timeline.setBounds (b.withTrimmedLeft (1));
+    b.removeFromLeft (1);
+
+    // right: sequencing, timeline, inspector
+    sequenceBar.setBounds (b.removeFromTop (sequenceBar.preferredHeight (b.getWidth())));
+    const int inspectorH = jmin (inspector.preferredHeight (b.getWidth()), b.getHeight() / 2);
+    inspector.setBounds (b.removeFromBottom (inspectorH).withTrimmedTop (1));
+    timeline.setBounds (b);
 }
 
 bool PatternEditorComponent::keyPressed (const KeyPress& key)

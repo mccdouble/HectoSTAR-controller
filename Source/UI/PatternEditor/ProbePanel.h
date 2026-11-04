@@ -2,7 +2,7 @@
     ------------------------------------------------------------------
 
     Pattern editor probe map (4 shanks x 16 LEDs, same channel numbering as
-    PatternGenGUI.m) and the sequencing tools that act on the selection.
+    PatternGenGUI.m) and the sequencing bar that acts on the selection.
 
     Click an LED to select it, Ctrl/Cmd-click to toggle, drag across LEDs
     to add them. LEDs with blocks are tinted.
@@ -47,7 +47,6 @@ public:
 
 private:
     PatternDocument& doc;
-    std::set<int> dragBase;
     bool dragToggle = false;
 
     void changeListenerCallback (ChangeBroadcaster*) override { repaint(); }
@@ -55,10 +54,13 @@ private:
     int ledAt (Point<float> p) const;
 };
 
-class ProbePanel : public Component
+/** Left column: selection buttons and the probe map. */
+class ProbePanel : public Component,
+                   private ChangeListener
 {
 public:
     explicit ProbePanel (PatternDocument& doc);
+    ~ProbePanel() override;
 
     void resized() override;
     void paint (Graphics& g) override;
@@ -66,16 +68,39 @@ public:
 private:
     PatternDocument& doc;
     ProbeMap map;
-
     EditorButton selectAll { "All" }, selectNone { "None" }, selectInUse { "In use" };
+    juce::Rectangle<int> header, hint;
+
+    void changeListenerCallback (ChangeBroadcaster*) override { repaint (header); }
+};
+
+/** Bar above the timeline: order, step and start, Add blocks, Stagger. */
+class SequenceBar : public Component,
+                    private ChangeListener
+{
+public:
+    explicit SequenceBar (PatternDocument& doc);
+    ~SequenceBar() override;
+
+    void resized() override;
+    void paint (Graphics& g) override;
+
+    /** One row when wide enough, otherwise two. */
+    int preferredHeight (int width) const;
+
+private:
+    PatternDocument& doc;
+
     Label orderLabel { {}, "Order" }, stepLabel { {}, "Step (ms)" }, startLabel { {}, "Start (ms)" };
     ComboBox orderBox;
     TextEditor stepEditor, startEditor;
-    EditorButton addButton { "Add blocks to selected LEDs", EditorButton::Style::Accent };
-    EditorButton staggerButton { "Stagger selected blocks" };
+    EditorButton addButton { "Add blocks", EditorButton::Style::Accent };
+    EditorButton staggerButton { "Stagger selected" };
 
-    juce::Rectangle<int> ledsHeader, sequenceHeader, hintArea;
+    void changeListenerCallback (ChangeBroadcaster*) override { refresh(); }
+    void refresh();
 
+    int controlsWidth() const;
     SequenceOrder order() const;
     double stepSeconds() const;
 
