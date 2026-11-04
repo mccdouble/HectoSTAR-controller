@@ -21,6 +21,7 @@ struct WaveChoice
 {
     enum class Group
     {
+        Shape,  // pulse shapes (shaped trains): the main dictionary
         Preset,
         Type,
         Custom
@@ -51,6 +52,12 @@ void updateFixedLength (Block& b);
 
 /** One-line explanation of a built-in type. */
 String typeGuide (WaveType type);
+
+/** One-line explanation of a pulse shape. */
+String shapeGuide (PulseShape shape);
+
+/** Name of a pulse shape as listed, e.g. "Gaussian". */
+String shapeName (PulseShape shape);
 
 /** Display name of a block's waveform. */
 String waveDisplayName (const WaveSpec& wave);

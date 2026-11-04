@@ -49,7 +49,7 @@ const TypeParams kParams[] = {
     { WaveType::Wavelet, { { "Peaks", 1 }, { "Amplitude (uA)", 1 }, { "Duration (ms)", 1000 }, { "", 1 }, { "", 1 } } },
 };
 
-const ParamDesc& paramDesc (WaveType t, int i)
+const ParamDesc& builtinDesc (WaveType t, int i)
 {
     for (const auto& p : kParams)
         if (p.type == t)
@@ -57,15 +57,46 @@ const ParamDesc& paramDesc (WaveType t, int i)
     return kParams[0].params[i];
 }
 
-double& param (ChannelWaveform& w, int i)
+/** Label and scale of parameter i of a waveform (empty label = unused). */
+ParamDesc paramDesc (const WaveSpec& w, int i)
 {
+    if (w.kind == WaveKind::Shaped)
+    {
+        const bool cycles = w.shaped.shape == PulseShape::SineCycle;
+        switch (i)
+        {
+            case 0: return { w.shaped.equalCharge ? "Square equiv. (uA)" : "Peak (uA)", 1 };
+            case 1: return { cycles ? "Cycle (ms)" : "Width (ms)", 1000 };
+            case 2: return { cycles ? "Cycles" : "Pulses", 1 };
+            case 3: return { "Rate (Hz)", 1 };
+            default: return { "Step (uA/pulse)", 1 };
+        }
+    }
+    if (w.kind == WaveKind::Builtin)
+        return builtinDesc (w.builtin.type, i);
+    return { "", 1 };
+}
+
+double* paramPtr (WaveSpec& w, int i)
+{
+    if (w.kind == WaveKind::Shaped)
+    {
+        switch (i)
+        {
+            case 0: return &w.shaped.amp;
+            case 1: return &w.shaped.width;
+            case 2: return &w.shaped.count;
+            case 3: return &w.shaped.rate;
+            default: return &w.shaped.step;
+        }
+    }
     switch (i)
     {
-        case 0: return w.freq;
-        case 1: return w.amp;
-        case 2: return w.offset;
-        case 3: return w.duty;
-        default: return w.step;
+        case 0: return &w.builtin.freq;
+        case 1: return &w.builtin.amp;
+        case 2: return &w.builtin.offset;
+        case 3: return &w.builtin.duty;
+        default: return &w.builtin.step;
     }
 }
 
@@ -139,6 +170,17 @@ BlockInspector::BlockInspector (PatternDocument& d) : doc (d)
         setupLabel (paramLabels[(std::size_t) i]);
         setupEditor (paramEditors[(std::size_t) i], [this, i] { commitParam (i); });
     }
+
+    chargeToggle.setTooltip ("Scale the peak so each pulse delivers the same charge as a square pulse of the set amplitude "
+                             "(the iso-energy comparison of Bansal et al. 2023)");
+    chargeToggle.onClick = [this]
+    {
+        if (updating)
+            return;
+        const bool on = chargeToggle.getToggleState();
+        apply ([on] (Block& b) { b.wave.shaped.equalCharge = on; });
+    };
+    addAndMakeVisible (chargeToggle);
 
     // points
     setupLabel (pointsLabel);
@@ -218,7 +260,7 @@ BlockInspector::BlockInspector (PatternDocument& d) : doc (d)
     addAndMakeVisible (spacingApply);
 
     // more options
-    moreButton.setTooltip ("Label, fade in and fade out");
+    moreButton.setTooltip ("Amplitude step per pulse, label, fade in and fade out");
     moreButton.onClick = [this]
     {
         showMore = ! showMore;
@@ -326,12 +368,14 @@ void BlockInspector::refresh()
 
         waveBox.setSelectedId (choiceIdFor (b->wave), dontSendNotification);
 
+        WaveSpec spec = b->wave;
         for (int i = 0; i < 5; ++i)
         {
-            const auto& pd = paramDesc (b->wave.builtin.type, i);
+            const auto pd = paramDesc (spec, i);
             paramLabels[(std::size_t) i].setText (String (pd.label).replace ("uA", kMicroAmps), dontSendNotification);
-            setEditorText (paramEditors[(std::size_t) i], formatNumber (param (const_cast<ChannelWaveform&> (b->wave.builtin), i) * pd.scale));
+            setEditorText (paramEditors[(std::size_t) i], formatNumber (*paramPtr (spec, i) * pd.scale));
         }
+        chargeToggle.setToggleState (b->wave.shaped.equalCharge, dontSendNotification);
 
         String pts;
         for (const auto& p : b->wave.points)
@@ -365,7 +409,9 @@ void BlockInspector::refresh()
         if (! formulaEditor.hasKeyboardFocus (true))
         {
             help.setColour (Label::textColourId, findColour (ThemeColours::defaultText).withAlpha (0.8f));
-            if (b->wave.kind == WaveKind::Builtin)
+            if (b->wave.kind == WaveKind::Shaped)
+                help.setText (shapeGuide (b->wave.shaped.shape), dontSendNotification);
+            else if (b->wave.kind == WaveKind::Builtin)
                 help.setText (typeGuide (b->wave.builtin.type), dontSendNotification);
             else if (b->wave.kind == WaveKind::Breakpoints)
                 help.setText ("Points are time (ms from the block start) : current (" + kMicroAmps + "). Repeat tiles the shape every last-point time.", dontSendNotification);
@@ -396,10 +442,18 @@ void BlockInspector::updateVisibility()
 
     for (int i = 0; i < 5; ++i)
     {
-        const bool used = sel && k == WaveKind::Builtin && paramDesc (b->wave.builtin.type, i).label[0] != 0;
+        bool used = sel && paramDesc (b->wave, i).label[0] != 0;
+        if (used && k == WaveKind::Shaped)
+        {
+            if (i == 3) // rate: only with more than one pulse
+                used = shapedCount (b->wave.shaped) > 1;
+            else if (i == 4) // step: under More options unless in use
+                used = showMore || b->wave.shaped.step != 0;
+        }
         paramLabels[(std::size_t) i].setVisible (used);
         paramEditors[(std::size_t) i].setVisible (used);
     }
+    chargeToggle.setVisible (sel && k == WaveKind::Shaped && b->wave.shaped.shape != PulseShape::Square);
 
     pointsLabel.setVisible (sel && k == WaveKind::Breakpoints);
     pointsEditor.setVisible (sel && k == WaveKind::Breakpoints);
@@ -529,6 +583,7 @@ int BlockInspector::doLayout (int width, bool applyBounds)
     std::vector<Item> wave = { { nullptr, &waveBox, 250 } };
     for (int i = 0; i < 5; ++i)
         wave.push_back ({ &paramLabels[(std::size_t) i], &paramEditors[(std::size_t) i], 80 });
+    wave.push_back ({ nullptr, &chargeToggle, 120 });
     wave.push_back ({ &pointsLabel, &pointsEditor, jmax (220, jmin (480, x1 - x0 - 620)) });
     wave.push_back ({ nullptr, &interpBox, 110 });
     wave.push_back ({ nullptr, &repeatToggle, 90 });
@@ -589,11 +644,12 @@ void BlockInspector::commitParam (int index)
     if (text.isEmpty())
         return;
 
-    const double value = text.getDoubleValue() / paramDesc (b->wave.builtin.type, index).scale;
-    if (param (const_cast<ChannelWaveform&> (b->wave.builtin), index) == value)
+    WaveSpec spec = b->wave;
+    const double value = text.getDoubleValue() / paramDesc (spec, index).scale;
+    if (*paramPtr (spec, index) == value)
         return;
 
-    apply ([index, value] (Block& x) { param (x.wave.builtin, index) = value; });
+    apply ([index, value] (Block& x) { *paramPtr (x.wave, index) = value; });
 }
 
 void BlockInspector::commitStart()

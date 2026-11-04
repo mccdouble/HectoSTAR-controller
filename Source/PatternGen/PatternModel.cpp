@@ -142,12 +142,26 @@ bool parseWaveType (const std::string& name, WaveType& type)
 
 json::Value number (double v) { return json::Value::makeNumber (v); }
 
+std::string formatNumberPlain (double v)
+{
+    std::ostringstream os;
+    os.imbue (std::locale::classic());
+    os << std::setprecision (6) << v;
+    return os.str();
+}
+
+std::string formatMs (double s)
+{
+    return formatNumberPlain (s * 1000.0) + " ms";
+}
+
 } // namespace
 
 const char* waveKindName (WaveKind kind)
 {
     switch (kind)
     {
+        case WaveKind::Shaped: return "shaped";
         case WaveKind::Builtin: return "builtin";
         case WaveKind::Breakpoints: return "breakpoints";
         case WaveKind::Samples: return "samples";
@@ -167,10 +181,181 @@ const char* interpolationName (Interpolation i)
     return "linear";
 }
 
+double pulseShapeValue (PulseShape shape, double x)
+{
+    x = std::min (1.0, std::max (0.0, x));
+
+    auto gauss = [] (double d, double sigma) { return std::exp (-(d * d) / (2.0 * sigma * sigma)); };
+
+    switch (shape)
+    {
+        case PulseShape::Square: return 1.0;
+        case PulseShape::RampUp: return x;
+        case PulseShape::RampDown: return 1.0 - x;
+        case PulseShape::Triangle: return x < 0.5 ? 2.0 * x : 2.0 * (1.0 - x);
+        case PulseShape::RampUpHold: return x < 0.5 ? 2.0 * x : 1.0;
+        case PulseShape::HoldRampDown: return x < 0.5 ? 1.0 : 2.0 * (1.0 - x);
+        case PulseShape::Gaussian: return gauss (x - 0.5, 1.0 / 7.0);
+        case PulseShape::RisingGaussian: return gauss (x - 1.0, 1.0 / 3.5);
+        case PulseShape::FallingGaussian: return gauss (x, 1.0 / 3.5);
+        case PulseShape::HalfSine: return std::sin (kPi * x);
+        case PulseShape::RisingSine: return std::sin (0.5 * kPi * x);
+        case PulseShape::FallingSine: return std::cos (0.5 * kPi * x);
+        case PulseShape::SineCycle: return 0.5 * (1.0 - std::cos (kTwoPi * x));
+    }
+    return 0.0;
+}
+
+namespace
+{
+
+/** x for sample j of an n-sample pulse: the middle of the sample, so shapes
+    are symmetric in samples and a one-sample pulse still has a value. A
+    rising shape ends at its peak and a falling one starts at it. */
+double pulseX (PulseShape shape, int j, int n)
+{
+    if (n <= 1)
+        return 0.5;
+    switch (shape)
+    {
+        case PulseShape::RampUp:
+        case PulseShape::RisingGaussian:
+        case PulseShape::RisingSine:
+            return (double) (j + 1) / n;
+        case PulseShape::RampDown:
+        case PulseShape::FallingGaussian:
+        case PulseShape::FallingSine:
+            return (double) j / n;
+        default:
+            return (j + 0.5) / n;
+    }
+}
+
+struct ShapeId
+{
+    PulseShape shape;
+    const char* id;
+};
+
+const ShapeId kShapeIds[] = {
+    { PulseShape::Square, "square" },
+    { PulseShape::RampUp, "ramp-up" },
+    { PulseShape::RampDown, "ramp-down" },
+    { PulseShape::Triangle, "triangle" },
+    { PulseShape::RampUpHold, "ramp-up-hold" },
+    { PulseShape::HoldRampDown, "hold-ramp-down" },
+    { PulseShape::Gaussian, "gaussian" },
+    { PulseShape::RisingGaussian, "rising-gaussian" },
+    { PulseShape::FallingGaussian, "falling-gaussian" },
+    { PulseShape::HalfSine, "half-sine" },
+    { PulseShape::RisingSine, "rising-sine" },
+    { PulseShape::FallingSine, "falling-sine" },
+    { PulseShape::SineCycle, "sine-cycle" },
+};
+
+} // namespace
+
+double pulseShapeMean (PulseShape shape, int n)
+{
+    n = std::max (1, n);
+    double sum = 0;
+    for (int j = 0; j < n; ++j)
+        sum += pulseShapeValue (shape, pulseX (shape, j, n));
+    return sum / n;
+}
+
+const char* pulseShapeId (PulseShape shape)
+{
+    for (const auto& s : kShapeIds)
+        if (s.shape == shape)
+            return s.id;
+    return "square";
+}
+
+bool pulseShapeFromId (const std::string& id, PulseShape& shape)
+{
+    for (const auto& s : kShapeIds)
+    {
+        if (id == s.id)
+        {
+            shape = s.shape;
+            return true;
+        }
+    }
+    return false;
+}
+
+int shapedPulseSamples (const ShapedTrain& t)
+{
+    if (! std::isfinite (t.width) || t.width <= 0)
+        return 1;
+    return std::max (1, (int) std::llround (std::min (t.width, 3600.0) * kSampleRateHz));
+}
+
+int shapedCount (const ShapedTrain& t)
+{
+    if (! std::isfinite (t.count))
+        return 1;
+    return (int) std::max (1.0, std::min (1.0e7, std::round (t.count)));
+}
+
+int shapedPeriodSamples (const ShapedTrain& t)
+{
+    if (shapedCount (t) <= 1 || ! std::isfinite (t.rate) || t.rate <= 0)
+        return shapedPulseSamples (t);
+    return std::max (1, (int) std::llround (kSampleRateHz / std::max (t.rate, 1.0e-6)));
+}
+
+double shapedMaxPeak (const ShapedTrain& t)
+{
+    const double last = t.amp + (shapedCount (t) - 1) * t.step;
+    const double highest = std::max (t.amp, last);
+    return t.equalCharge ? highest / pulseShapeMean (t.shape, shapedPulseSamples (t)) : highest;
+}
+
+namespace
+{
+
+/** Renders n samples of a shaped train from its first sample. */
+void renderShaped (const ShapedTrain& t, int n, double* out)
+{
+    const int width = shapedPulseSamples (t);
+    const int period = shapedPeriodSamples (t);
+    const int pulseLen = std::min (width, period);
+    const int count = shapedCount (t);
+    const double scale = t.equalCharge ? 1.0 / pulseShapeMean (t.shape, width) : 1.0;
+
+    // the shape of one pulse, once
+    std::vector<double> shape ((std::size_t) pulseLen);
+    for (int j = 0; j < pulseLen; ++j)
+        shape[(std::size_t) j] = pulseShapeValue (t.shape, pulseX (t.shape, j, width)) * scale;
+
+    for (int k = 0; k < n; ++k)
+    {
+        const int pulse = k / period;
+        const int j = k - pulse * period;
+        if (pulse >= count || j >= pulseLen)
+        {
+            out[k] = 0.0;
+            continue;
+        }
+        const double amp = std::max (0.0, t.amp + pulse * t.step);
+        out[k] = amp * shape[(std::size_t) j];
+    }
+}
+
+} // namespace
+
 double naturalLength (const WaveSpec& wave)
 {
     switch (wave.kind)
     {
+        case WaveKind::Shaped:
+        {
+            const ShapedTrain& t = wave.shaped;
+            const int last = (shapedCount (t) - 1) * shapedPeriodSamples (t) + std::min (shapedPulseSamples (t), shapedPeriodSamples (t));
+            return (double) last / kSampleRateHz;
+        }
         case WaveKind::Builtin:
         {
             const ChannelWaveform& w = wave.builtin;
@@ -278,6 +463,22 @@ std::vector<std::string> validate (const Pattern& pattern)
                 if (b.wave.samples.empty())
                     problems.push_back (blockName (b) + ": no samples.");
                 break;
+            case WaveKind::Shaped:
+            {
+                const ShapedTrain& t = b.wave.shaped;
+                if (! std::isfinite (t.amp) || ! std::isfinite (t.width) || t.width <= 0 || ! std::isfinite (t.count) || t.count < 1
+                    || ! std::isfinite (t.step))
+                    problems.push_back (blockName (b) + ": amplitude, width and count must be valid numbers (width above 0, count 1 or more).");
+                else if (shapedCount (t) > 1 && (! std::isfinite (t.rate) || t.rate <= 0))
+                    problems.push_back (blockName (b) + ": rate must be above 0 Hz.");
+                else if (shapedCount (t) > 1 && shapedPulseSamples (t) > shapedPeriodSamples (t))
+                    problems.push_back (blockName (b) + ": pulses are longer (" + formatMs (t.width) + ") than the time between them ("
+                                        + formatMs (1.0 / t.rate) + " at " + formatNumberPlain (t.rate) + " Hz).");
+                else if (shapedMaxPeak (t) > kMaxCurrentUa + 0.5)
+                    problems.push_back (blockName (b) + ": needs a peak of " + formatNumberPlain (std::round (shapedMaxPeak (t)))
+                                        + " uA, above the 100 uA limit" + (t.equalCharge ? " (to match the square-pulse charge)." : "."));
+                break;
+            }
             case WaveKind::Builtin:
                 break;
         }
@@ -319,6 +520,13 @@ bool renderPattern (const Pattern& pattern, PatternData& out, std::string& error
 
         switch (b.wave.kind)
         {
+            case WaveKind::Shaped:
+            {
+                // the train starts at the block's first sample
+                renderShaped (b.wave.shaped, n, buf.data());
+                break;
+            }
+
             case WaveKind::Builtin:
             {
                 ChannelWaveform cfg = b.wave.builtin;
@@ -424,6 +632,18 @@ std::string toJson (const Pattern& pattern)
 
         switch (b.wave.kind)
         {
+            case WaveKind::Shaped:
+                w.set ("shape", json::Value::makeString (pulseShapeId (b.wave.shaped.shape)));
+                w.set ("amp", number (b.wave.shaped.amp));
+                w.set ("width", number (b.wave.shaped.width));
+                w.set ("count", number (b.wave.shaped.count));
+                w.set ("rate", number (b.wave.shaped.rate));
+                if (b.wave.shaped.step != 0)
+                    w.set ("step", number (b.wave.shaped.step));
+                if (b.wave.shaped.equalCharge)
+                    w.set ("equalCharge", json::Value::makeBool (true));
+                break;
+
             case WaveKind::Builtin:
                 w.set ("type", json::Value::makeString (waveTypeName (b.wave.builtin.type)));
                 w.set ("freq", number (b.wave.builtin.freq));
@@ -527,7 +747,23 @@ bool fromJson (const std::string& text, Pattern& pattern, std::string& error)
 
             const std::string kind = w->getString ("kind", "builtin");
 
-            if (kind == "builtin")
+            if (kind == "shaped")
+            {
+                b.wave.kind = WaveKind::Shaped;
+                const std::string shape = w->getString ("shape", "square");
+                if (! pulseShapeFromId (shape, b.wave.shaped.shape))
+                {
+                    error = blockName (b) + ": unknown pulse shape '" + shape + "'.";
+                    return false;
+                }
+                b.wave.shaped.amp = w->getNumber ("amp", 0);
+                b.wave.shaped.width = w->getNumber ("width", 0.005);
+                b.wave.shaped.count = w->getNumber ("count", 1);
+                b.wave.shaped.rate = w->getNumber ("rate", 10);
+                b.wave.shaped.step = w->getNumber ("step", 0);
+                b.wave.shaped.equalCharge = w->getBool ("equalCharge", false);
+            }
+            else if (kind == "builtin")
             {
                 b.wave.kind = WaveKind::Builtin;
                 const std::string type = w->getString ("type", "none");

@@ -48,9 +48,11 @@ private:
 
     ComboBox waveBox;
 
-    // built-in parameters: freq, amp, offset, duty, step
+    // waveform parameters: shaped trains (amplitude, width, count, rate,
+    // step) or built-in types (freq, amp, offset, duty, step)
     std::array<Label, 5> paramLabels;
     std::array<TextEditor, 5> paramEditors;
+    ToggleButton chargeToggle { "Equal charge" };
 
     // custom waveforms
     Label pointsLabel;

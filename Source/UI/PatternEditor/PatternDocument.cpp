@@ -13,15 +13,14 @@ namespace PatternEditor
 
 PatternDocument::PatternDocument()
 {
-    // a sensible first block: a 10 Hz train of 5 ms, 50 uA pulses for 1 s
-    newBlockTemplate.length = 1.0;
-    newBlockTemplate.label = "10 Hz, 5 ms, 50 \xc2\xb5" "A";
-    newBlockTemplate.wave.kind = WaveKind::Builtin;
-    newBlockTemplate.wave.builtin.type = WaveType::FixedPulse;
-    newBlockTemplate.wave.builtin.freq = 10;
-    newBlockTemplate.wave.builtin.amp = 50;
-    newBlockTemplate.wave.builtin.offset = 0.1;
-    newBlockTemplate.wave.builtin.duty = 5;
+    // a sensible first block: ten 5 ms, 50 uA square pulses at 10 Hz
+    newBlockTemplate.wave.kind = WaveKind::Shaped;
+    newBlockTemplate.wave.shaped.shape = PulseShape::Square;
+    newBlockTemplate.wave.shaped.amp = 50;
+    newBlockTemplate.wave.shaped.width = 0.005;
+    newBlockTemplate.wave.shaped.count = 10;
+    newBlockTemplate.wave.shaped.rate = 10;
+    newBlockTemplate.length = naturalLength (newBlockTemplate.wave);
 
     render();
 }

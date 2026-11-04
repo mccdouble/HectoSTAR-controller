@@ -234,8 +234,8 @@ AddBar::AddBar (PatternDocument& d) : doc (d)
     addLabel.setFont (FontOptions (13.0f, Font::bold));
 
     addWaveChoices (waveBox, true);
-    waveBox.setSelectedId (1, dontSendNotification); // first preset
-    waveBox.setTooltip ("What to add: a preset, a waveform type, or a custom shape. Adjust it afterwards in the panel below.");
+    waveBox.setSelectedId (1, dontSendNotification); // square pulses
+    waveBox.setTooltip ("What to add: a pulse shape, a preset, a classic waveform, or a custom shape. Set amplitude, width, count and rate afterwards in the panel below.");
     waveBox.onChange = [this] { chooseWave(); };
     addAndMakeVisible (waveBox);
 

@@ -8,8 +8,11 @@
     [start, start + length). Blocks may overlap on the same LED; overlapping
     currents combine by taking the higher value (then clipped to 0..100 uA).
 
-    Waveforms are either one of the built-in types of PatternGenGUI.m, or a
-    custom shape: breakpoints, imported samples, or a formula (Formula.h).
+    Waveforms are a train of shaped pulses (the temporal shapes of Bansal,
+    Pyari and Roy 2023, "Optogenetic generation of neural firing patterns
+    with temporal shaping of light pulses", Photonics 10:571), one of the
+    built-in types of PatternGenGUI.m, or a custom shape: breakpoints,
+    imported samples, or a formula (Formula.h).
 
     Designs are saved as JSON (toJson / fromJson). Rendering goes through
     PatternGenerator, so a design with one built-in block per LED renders
@@ -31,6 +34,7 @@ namespace PatternGen
 
 enum class WaveKind
 {
+    Shaped,      // a train of identical shaped pulses or cycles (ShapedTrain)
     Builtin,     // one of the PatternGenGUI.m waveform types
     Breakpoints, // points joined by step / linear / smooth segments
     Samples,     // explicit values at 20 kHz (e.g. imported from CSV)
@@ -44,6 +48,60 @@ enum class Interpolation
     Smooth  // cosine ease between points
 };
 
+/** Shape of one pulse, as a function of x = 0..1 across the pulse width.
+    The first twelve are Table 6 of Bansal et al. 2023 (their names in
+    comments); "rising" shapes peak at the end of the pulse, "falling" ones
+    at the start. */
+enum class PulseShape
+{
+    Square,          // square
+    RampUp,          // left-triangular: x
+    RampDown,        // right-triangular: 1 - x
+    Triangle,        // triangular: up over the first half, down over the second
+    RampUpHold,      // backward-ramp: up over the first half, then hold
+    HoldRampDown,    // forward-ramp: hold for the first half, then down
+    Gaussian,        // gaussian: centred, sigma = width / 7
+    RisingGaussian,  // left-gaussian: peak at the end, sigma = width / 3.5
+    FallingGaussian, // right-gaussian: peak at the start, sigma = width / 3.5
+    HalfSine,        // positive-sinusoidal: sin(pi x)
+    RisingSine,      // left-positive-sinusoidal: sin(pi/2 x)
+    FallingSine,     // right-positive-sinusoidal: cos(pi/2 x)
+    SineCycle        // one full sine cycle from 0 up to the peak and back: (1 - cos 2 pi x) / 2
+};
+
+constexpr int kNumPulseShapes = 13;
+
+/** A train of identical pulses: count pulses, one starting every 1/rate s,
+    each lasting width s with the given shape. */
+struct ShapedTrain
+{
+    PulseShape shape = PulseShape::Square;
+    double amp = 50;      // uA: the peak, or with equalCharge the height of the matching square pulse
+    double width = 0.005; // s, one pulse (or one cycle)
+    double count = 1;     // pulses (rounded to a whole number, at least 1)
+    double rate = 10;     // Hz, pulse starts per second (unused for one pulse)
+    double step = 0;      // uA added to the amplitude on each following pulse
+    bool equalCharge = false; // scale the peak so each pulse carries the charge of a square pulse of amp
+};
+
+/** Shape value (0..1) at x in 0..1. */
+double pulseShapeValue (PulseShape shape, double x);
+
+/** Mean of the shape over one pulse of n samples (1 for a square pulse). */
+double pulseShapeMean (PulseShape shape, int n);
+
+/** Id used in saved designs ("square", "ramp-up", ...). */
+const char* pulseShapeId (PulseShape shape);
+bool pulseShapeFromId (const std::string& id, PulseShape& shape);
+
+/** Samples in one pulse, and between pulse starts. */
+int shapedPulseSamples (const ShapedTrain& train);
+int shapedPeriodSamples (const ShapedTrain& train);
+int shapedCount (const ShapedTrain& train);
+
+/** Highest peak current (uA) the train asks for, after equal-charge scaling. */
+double shapedMaxPeak (const ShapedTrain& train);
+
 struct Breakpoint
 {
     double time = 0;  // s from block start
@@ -54,6 +112,9 @@ struct Breakpoint
 struct WaveSpec
 {
     WaveKind kind = WaveKind::Builtin;
+
+    // Shaped: pulse train settings.
+    ShapedTrain shaped;
 
     // Builtin: MATLAB-table parameters. The delay field is ignored; the block's
     // start time is used instead.
@@ -97,8 +158,8 @@ struct Pattern
     std::vector<Block> blocks;
 };
 
-/** How long a waveform naturally lasts (s): count x period for the fixed
-    built-in types, D for wavelet, the last point for non-repeating
+/** How long a waveform naturally lasts (s): to the end of the last pulse
+    for shaped trains, count x period for the fixed built-in types, D for wavelet, the last point for non-repeating
     breakpoints, samples / fs for non-repeating samples. 0 when it runs until
     the block ends (continuous built-ins, formulas, repeating shapes). */
 double naturalLength (const WaveSpec& wave);

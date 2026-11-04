@@ -132,3 +132,38 @@ Board. 2-Shank Chronic is not yet verified and must be labelled as such.
 Built-in fields keep the MATLAB table's meanings (`freq` = "Freq/#Pulses",
 `offset` = "Offset/Period", `duty` = "Duty (%) / Cycles"). Numbers are
 written with full precision; NaN/Inf parameters are written as `null`.
+
+## Pulse shapes (shaped trains)
+
+The main waveform list is a dictionary of pulse shapes. Each block of this
+kind is a train: `count` pulses, one starting every `1/rate` s, each `width`
+s long, at `amp` uA peak (plus `step` uA per following pulse). With
+`equalCharge`, the peak is scaled so each pulse carries the charge of a
+square pulse at `amp` (the iso-energy condition of the paper below); a
+pattern needing more than 100 uA is reported, not clipped.
+
+The first twelve shapes are Table 6 of Bansal, Pyari and Roy 2023,
+"Optogenetic generation of neural firing patterns with temporal shaping of
+light pulses", Photonics 10(5):571 (doi:10.3390/photonics10050571):
+
+| Editor name           | Paper name                 | Shape over x = 0..1            |
+|-----------------------|----------------------------|--------------------------------|
+| Square pulses         | square                     | 1                              |
+| Ramp up               | left-triangular            | x                              |
+| Ramp down             | right-triangular           | 1 - x                          |
+| Triangle              | triangular                 | 2x, then 2(1 - x)              |
+| Ramp up, then hold    | backward-ramp              | 2x, then 1                     |
+| Hold, then ramp down  | forward-ramp               | 1, then 2(1 - x)               |
+| Gaussian              | Gaussian                   | exp(-(x-0.5)^2 / 2s^2), s = 1/7 |
+| Rising half-Gaussian  | left-Gaussian              | centre at x = 1, s = 1/3.5     |
+| Falling half-Gaussian | right-Gaussian             | centre at x = 0, s = 1/3.5     |
+| Half-sine             | positive-sinusoidal        | sin(pi x)                      |
+| Rising quarter-sine   | left-positive-sinusoidal   | sin(pi x / 2)                  |
+| Falling quarter-sine  | right-positive-sinusoidal  | cos(pi x / 2)                  |
+| Sine cycles           | (added)                    | (1 - cos 2 pi x) / 2           |
+
+Samples are taken at the middle of each 50 us step, except that rising
+shapes end exactly at the peak and falling shapes start at it. The paper's
+"left/right" names are kept in the editor's help text. Note the paper lists
+iso-energy irradiance 2.635x for the Gaussians; its sigma = width/7 gives
+2.79x, which is what equal charge uses (computed from the rendered samples).

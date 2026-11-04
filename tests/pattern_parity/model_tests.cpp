@@ -472,6 +472,130 @@ static void testHelpers()
     CHECK (validate (broken).size() == 2, "LED 65 and the formula error should both be reported");
 }
 
+static Block shapedBlock (int id, int led, double start, const ShapedTrain& t)
+{
+    Block b;
+    b.id = id;
+    b.led = led;
+    b.start = start;
+    b.wave.kind = WaveKind::Shaped;
+    b.wave.shaped = t;
+    b.length = naturalLength (b.wave);
+    return b;
+}
+
+static void testShapedTrains()
+{
+    std::printf ("Shaped pulse trains (Bansal et al. 2023 shapes)\n");
+
+    // 10 square pulses, 5 ms at 20 Hz, 50 uA
+    ShapedTrain sq;
+    sq.amp = 50;
+    sq.width = 0.005;
+    sq.count = 10;
+    sq.rate = 20;
+    Pattern p;
+    p.duration = 1;
+    p.blocks.push_back (shapedBlock (1, 7, 0.1, sq));
+    CHECK (std::fabs (p.blocks[0].length - (9 * 0.05 + 0.005)) < 1e-12, "length ends with the last pulse");
+    auto lane = renderLane (p, 7);
+    int on = 0;
+    for (auto v : lane)
+        on += v == 50 ? 1 : (v != 0 ? 1000 : 0);
+    CHECK (on == 10 * 100, "10 pulses of 100 samples at 50 uA (got %d)", on);
+    CHECK (lane[2000] == 50 && lane[1999] == 0 && lane[2099] == 50 && lane[2100] == 0 && lane[3000] == 50, "pulse edges");
+    CHECK (lane[2000 + 9 * 1000] == 50 && lane[2000 + 10 * 1000] == 0, "stops after 10 pulses");
+
+    // every shape stays within 0..1, peaks near 1, and has the expected area
+    const double area[] = { 1.0, 0.5, 0.5, 0.5, 0.75, 0.75, 0.3579, 0.3579, 0.3579, 2 / kPi, 2 / kPi, 2 / kPi, 0.5 };
+    for (int s = 0; s < kNumPulseShapes; ++s)
+    {
+        const auto shape = (PulseShape) s;
+        double peak = 0;
+        for (int j = 0; j <= 1000; ++j)
+        {
+            const double v = pulseShapeValue (shape, j / 1000.0);
+            CHECK (v >= 0 && v <= 1, "%s out of range", pulseShapeId (shape));
+            peak = std::max (peak, v);
+        }
+        CHECK (peak > 0.999, "%s peak %g", pulseShapeId (shape), peak);
+        CHECK (std::fabs (pulseShapeMean (shape, 2000) - area[s]) < 2e-3, "%s mean %g", pulseShapeId (shape), pulseShapeMean (shape, 2000));
+        PulseShape back;
+        CHECK (pulseShapeFromId (pulseShapeId (shape), back) && back == shape, "%s id round trip", pulseShapeId (shape));
+    }
+
+    // rising shapes end at the peak, falling ones start at it
+    ShapedTrain up;
+    up.shape = PulseShape::RampUp;
+    up.amp = 100;
+    up.width = 0.005;
+    Pattern pu;
+    pu.blocks.push_back (shapedBlock (1, 1, 0, up));
+    lane = renderLane (pu, 1);
+    CHECK (lane[0] == 1 && lane[99] == 100 && lane[100] == 0, "ramp up 1..100 uA");
+    pu.blocks[0].wave.shaped.shape = PulseShape::RampDown;
+    lane = renderLane (pu, 1);
+    CHECK (lane[0] == 100 && lane[99] == 1, "ramp down 100..1 uA");
+
+    // equal charge: a 5 ms triangle matching a 40 uA square pulse peaks at 80 uA
+    ShapedTrain tri;
+    tri.shape = PulseShape::Triangle;
+    tri.amp = 40;
+    tri.width = 0.005;
+    tri.equalCharge = true;
+    Pattern pt;
+    pt.blocks.push_back (shapedBlock (1, 2, 0, tri));
+    lane = renderLane (pt, 2);
+    int sum = 0, top = 0;
+    for (auto v : lane)
+    {
+        sum += v;
+        top = std::max (top, (int) v);
+    }
+    CHECK (std::abs (sum - 40 * 100) <= 50 && top >= 79 && top <= 80, "equal charge sum %d peak %d", sum, top);
+    CHECK (std::fabs (shapedMaxPeak (tri) - 80) < 0.01, "max peak %g", shapedMaxPeak (tri));
+    tri.amp = 60;
+    pt.blocks[0].wave.shaped = tri;
+    CHECK (validate (pt).size() == 1, "120 uA peak should be reported");
+
+    // staircase: amplitude steps per pulse
+    ShapedTrain st = sq;
+    st.amp = 10;
+    st.step = 10;
+    st.count = 3;
+    Pattern ps;
+    ps.blocks.push_back (shapedBlock (1, 3, 0, st));
+    lane = renderLane (ps, 3);
+    CHECK (lane[0] == 10 && lane[1000] == 20 && lane[2000] == 30, "staircase 10, 20, 30 uA");
+
+    // width longer than the period is reported
+    ShapedTrain wide = sq;
+    wide.width = 0.06;
+    Pattern pw;
+    pw.blocks.push_back (shapedBlock (1, 4, 0, wide));
+    CHECK (validate (pw).size() == 1, "60 ms pulses at 20 Hz should be reported");
+
+    // saved and loaded unchanged
+    Pattern pj;
+    ShapedTrain g;
+    g.shape = PulseShape::RisingGaussian;
+    g.amp = 33.5;
+    g.width = 0.0125;
+    g.count = 7;
+    g.rate = 13.5;
+    g.step = -2;
+    g.equalCharge = true;
+    pj.blocks.push_back (shapedBlock (1, 5, 0.25, g));
+    Pattern loaded;
+    std::string error;
+    CHECK (fromJson (toJson (pj), loaded, error), "load: %s", error.c_str());
+    const auto& lg = loaded.blocks.at (0).wave;
+    CHECK (lg.kind == WaveKind::Shaped && lg.shaped.shape == g.shape && lg.shaped.amp == g.amp && lg.shaped.width == g.width
+               && lg.shaped.count == g.count && lg.shaped.rate == g.rate && lg.shaped.step == g.step && lg.shaped.equalCharge,
+           "shaped json round trip");
+    CHECK (encode (loaded) == encode (pj), "shaped render after round trip");
+}
+
 int main (int argc, char** argv)
 {
     if (argc != 3)
@@ -487,6 +611,7 @@ int main (int argc, char** argv)
     testFormulaLanguage();
     testJson();
     testHelpers();
+    testShapedTrains();
 
     std::printf ("%d of %d checks passed\n", checks - failures, checks);
     return failures == 0 ? 0 : 1;

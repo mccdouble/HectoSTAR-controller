@@ -206,9 +206,9 @@ void TimelineView::paint (Graphics& g)
         g.drawText ("Build a pattern", lines.removeFromTop (26), Justification::centredLeft);
         g.setFont (FontOptions (13.0f));
         for (const char* step : { "1.  Select LEDs on the probe map (left).",
-                                  "2.  Set the waveform below, or pick a preset.",
-                                  "3.  Click \"Add blocks\" above, with an order and step to stagger them.",
-                                  "Or double-click a lane to drop a single block." })
+                                  "2.  Pick a pulse shape or preset above, and how the LEDs are timed.",
+                                  "3.  Click \"Add\", then set amplitude, width, count and rate below.",
+                                  "Or double-click a lane to add a single block." })
             g.drawText (step, lines.removeFromTop (24), Justification::centredLeft);
     }
 }

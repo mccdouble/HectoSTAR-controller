@@ -36,6 +36,44 @@ WaveSpec builtin (WaveType type, double freq, double amp, double offset, double 
     return w;
 }
 
+WaveSpec shaped (PulseShape shape, double amp, double widthMs, int count, double rate, double step = 0, bool equalCharge = false)
+{
+    WaveSpec w;
+    w.kind = WaveKind::Shaped;
+    w.shaped.shape = shape;
+    w.shaped.amp = amp;
+    w.shaped.width = widthMs / 1000.0;
+    w.shaped.count = count;
+    w.shaped.rate = rate;
+    w.shaped.step = step;
+    w.shaped.equalCharge = equalCharge;
+    return w;
+}
+
+struct ShapeInfo
+{
+    PulseShape shape;
+    const char* name;
+    const char* guide;
+};
+
+// names in quotes are those of Bansal, Pyari and Roy 2023 (Photonics 10:571, Table 6)
+const ShapeInfo kShapeInfo[] = {
+    { PulseShape::Square, "Square pulses", "Constant current for the pulse width (\"square\")." },
+    { PulseShape::RampUp, "Ramp up", "Rises linearly from 0 to the peak, then stops (\"left-triangular\")." },
+    { PulseShape::RampDown, "Ramp down", "Starts at the peak and falls linearly to 0 (\"right-triangular\")." },
+    { PulseShape::Triangle, "Triangle", "Rises to the peak at mid-pulse, then falls back to 0 (\"triangular\")." },
+    { PulseShape::RampUpHold, "Ramp up, then hold", "Rises over the first half, holds the peak for the second (\"backward-ramp\")." },
+    { PulseShape::HoldRampDown, "Hold, then ramp down", "Holds the peak for the first half, falls to 0 over the second (\"forward-ramp\")." },
+    { PulseShape::Gaussian, "Gaussian", "Bell-shaped, peak at mid-pulse, sigma = width / 7 (\"Gaussian\")." },
+    { PulseShape::RisingGaussian, "Rising half-Gaussian", "Slow Gaussian rise to the peak at the end of the pulse, sigma = width / 3.5 (\"left-Gaussian\")." },
+    { PulseShape::FallingGaussian, "Falling half-Gaussian", "Starts at the peak and decays like a Gaussian, sigma = width / 3.5 (\"right-Gaussian\")." },
+    { PulseShape::HalfSine, "Half-sine", "One positive half of a sine: 0, up to the peak, back to 0 (\"positive-sinusoidal\")." },
+    { PulseShape::RisingSine, "Rising quarter-sine", "Quarter sine from 0 up to the peak at the end (\"left-positive-sinusoidal\")." },
+    { PulseShape::FallingSine, "Falling quarter-sine", "Quarter sine from the peak down to 0 (\"right-positive-sinusoidal\")." },
+    { PulseShape::SineCycle, "Sine cycles", "Whole sine cycles between 0 and the peak. Set the cycle length to 1 / rate for a continuous sine." },
+};
+
 WaveSpec points (std::vector<Breakpoint> p, bool repeat)
 {
     WaveSpec w;
@@ -80,19 +118,34 @@ const std::vector<WaveChoice>& waveChoices()
 {
     using G = WaveChoice::Group;
 
-    static const std::vector<WaveChoice> list = {
+    static const std::vector<WaveChoice> list = [] {
+        std::vector<WaveChoice> l;
+
+        // pulse shapes: pick one, then set amplitude, width, count and rate
+        for (const auto& s : kShapeInfo)
+        {
+            if (s.shape == PulseShape::Square)
+                l.push_back ({ G::Shape, s.name, "", shaped (s.shape, 50, 5, 10, 10) });
+            else if (s.shape == PulseShape::SineCycle)
+                l.push_back ({ G::Shape, s.name, "", shaped (s.shape, 50, 125, 8, 8) });
+            else
+                l.push_back ({ G::Shape, s.name, "", shaped (s.shape, 50, 10, 10, 10) });
+        }
+
+        const std::vector<WaveChoice> rest = {
         // presets: ready-made settings
-        { G::Preset, "10 Hz pulses, 5 ms, 50 uA, 1 s", "10 Hz, 5 ms, 50 uA", builtin (WaveType::FixedPulse, 10, 50, 0.1, 5) },
-        { G::Preset, "20 Hz pulses, 10 ms, 50 uA, 1 s", "20 Hz, 10 ms, 50 uA", builtin (WaveType::FixedPulse, 20, 50, 0.05, 20) },
-        { G::Preset, "40 Hz pulses, 2 ms, 50 uA, 0.5 s", "40 Hz, 2 ms, 50 uA", builtin (WaveType::FixedPulse, 20, 50, 0.025, 8) },
-        { G::Preset, "Single 10 ms pulse, 50 uA", "10 ms pulse", builtin (WaveType::FixedPulse, 1, 50, 0.01, 100) },
-        { G::Preset, "Staircase 10 to 80 uA, 8 x 100 ms", "Staircase 10-80 uA", builtin (WaveType::PulseStaircase, 8, 10, 0.1, 50, 10) },
-        { G::Preset, "Sine 8 Hz, 0 to 100 uA", "Sine 8 Hz", builtin (WaveType::Sine, 8, 50, 50, 0) },
-        { G::Preset, "Ramp 0 to 100 uA over 100 ms", "Ramp 100 ms", points ({ { 0, 0 }, { 0.1, 100 } }, false) },
-        { G::Preset, "Triangle 0-80-0 uA every 20 ms", "Triangle 20 ms", points ({ { 0, 0 }, { 0.01, 80 }, { 0.02, 0 } }, true) },
+        { G::Preset, "10 Hz square, 5 ms, 50 uA, 1 s", "10 Hz, 5 ms, 50 uA", shaped (PulseShape::Square, 50, 5, 10, 10) },
+        { G::Preset, "20 Hz square, 10 ms, 50 uA, 1 s", "20 Hz, 10 ms, 50 uA", shaped (PulseShape::Square, 50, 10, 20, 20) },
+        { G::Preset, "40 Hz square, 2 ms, 50 uA, 0.5 s", "40 Hz, 2 ms, 50 uA", shaped (PulseShape::Square, 50, 2, 20, 40) },
+        { G::Preset, "Single 10 ms pulse, 50 uA", "10 ms pulse", shaped (PulseShape::Square, 50, 10, 1, 10) },
+        { G::Preset, "Staircase 10 to 80 uA, 8 x 50 ms pulses", "Staircase 10-80 uA", shaped (PulseShape::Square, 10, 50, 8, 10, 10) },
+        { G::Preset, "10 Hz Gaussian, 10 ms, charge of a 20 uA square", "Gaussian, 20 uA equiv.", shaped (PulseShape::Gaussian, 20, 10, 10, 10, 0, true) },
+        { G::Preset, "Sine 8 Hz, 0 to 100 uA, 1 s", "Sine 8 Hz", shaped (PulseShape::SineCycle, 100, 125, 8, 8) },
+        { G::Preset, "Ramp 0 to 100 uA over 100 ms", "Ramp 100 ms", shaped (PulseShape::RampUp, 100, 100, 1, 10) },
+        { G::Preset, "Triangle 0-80-0 uA every 20 ms, 1 s", "Triangle 20 ms", shaped (PulseShape::Triangle, 80, 20, 50, 50) },
         { G::Preset, "40 Hz bursts on an 8 Hz sine", "Theta-gamma", formula ("40*(1+sin(2*pi*8*t)) * (1+square(2*pi*40*t, 50))/2") },
 
-        // built-in types with sensible defaults
+        // built-in types of the MATLAB tool, with sensible defaults
         { G::Type, "Pulse train", "", builtin (WaveType::FixedPulse, 10, 50, 0.1, 5) },
         { G::Type, "Pulse staircase", "", builtin (WaveType::PulseStaircase, 8, 10, 0.1, 50, 10) },
         { G::Type, "Square wave", "", builtin (WaveType::Pulse, 10, 25, 25, 50) },
@@ -112,7 +165,11 @@ const std::vector<WaveChoice>& waveChoices()
              w.kind = WaveKind::Samples;
              return w;
          }() },
-    };
+        };
+
+        l.insert (l.end(), rest.begin(), rest.end());
+        return l;
+    }();
 
     // labels and names use the micro sign
     static std::vector<WaveChoice> withMicro = [] {
@@ -144,7 +201,11 @@ void addWaveChoices (ComboBox& box, bool includePresets)
         {
             if (! first)
                 box.addSeparator();
-            box.addSectionHeading (c.group == WaveChoice::Group::Preset ? "Presets" : (c.group == WaveChoice::Group::Type ? "Waveforms" : "Custom"));
+            const char* heading = c.group == WaveChoice::Group::Shape    ? "Pulse shapes"
+                                  : c.group == WaveChoice::Group::Preset ? "Presets"
+                                  : c.group == WaveChoice::Group::Type   ? "Classic waveforms (MATLAB tool)"
+                                                                         : "Custom";
+            box.addSectionHeading (heading);
             current = c.group;
             first = false;
         }
@@ -161,6 +222,12 @@ int choiceIdFor (const WaveSpec& wave)
         const auto& c = list[i];
         if (c.group == WaveChoice::Group::Preset || c.wave.kind != wave.kind)
             continue;
+        if (wave.kind == WaveKind::Shaped)
+        {
+            if (c.wave.shaped.shape == wave.shaped.shape)
+                return (int) i + 1;
+            continue;
+        }
         if (wave.kind != WaveKind::Builtin || c.wave.builtin.type == wave.builtin.type)
             return (int) i + 1;
     }
@@ -187,8 +254,26 @@ String typeGuide (WaveType type)
     return {};
 }
 
+String shapeGuide (PulseShape shape)
+{
+    for (const auto& s : kShapeInfo)
+        if (s.shape == shape)
+            return String (s.guide) + "  Equal charge scales the peak so each pulse carries the charge of a square pulse at the set amplitude.";
+    return {};
+}
+
+String shapeName (PulseShape shape)
+{
+    for (const auto& s : kShapeInfo)
+        if (s.shape == shape)
+            return s.name;
+    return "Pulses";
+}
+
 String waveDisplayName (const WaveSpec& wave)
 {
+    if (wave.kind == WaveKind::Shaped)
+        return shapeName (wave.shaped.shape);
     if (wave.kind == WaveKind::Builtin)
     {
         for (const auto& t : kTypeInfo)
@@ -256,6 +341,22 @@ String lengthDescription (const Block& b)
     const double n = naturalLength (b.wave);
     if (n <= 0)
         return {};
+
+    if (b.wave.kind == WaveKind::Shaped)
+    {
+        const auto& t = b.wave.shaped;
+        const int count = shapedCount (t);
+        const bool cycles = t.shape == PulseShape::SineCycle;
+        String s = "lasts " + ms (n);
+        if (count == 1)
+            s << (cycles ? "  (one cycle)" : "  (one pulse)");
+        else
+            s << "  (" << count << (cycles ? " cycles" : " pulses") << " at "
+              << String (t.rate, 3).trimCharactersAtEnd ("0").trimCharactersAtEnd (".") << " Hz)";
+        if (t.equalCharge)
+            s << ",  peak " << String (shapedMaxPeak (t), 1).trimCharactersAtEnd ("0").trimCharactersAtEnd (".") << " " << kMicroAmps;
+        return s;
+    }
 
     if (b.wave.kind == WaveKind::Builtin)
     {
