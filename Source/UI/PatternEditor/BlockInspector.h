@@ -1,12 +1,14 @@
 /*
     ------------------------------------------------------------------
 
-    Pattern editor inspector: edits the selected blocks (all of them at
-    once; linked copies are selected together), or the settings used for
-    new blocks when nothing is selected.
+    Pattern editor inspector: edits the blocks selected on the timeline
+    (all of them at once; linked copies are selected together). Nothing is
+    shown when no block is selected.
 
-    Currents are in uA, times in ms. Built-in waveform parameters keep the
-    meanings of PatternGenGUI.m's table, relabelled per type.
+    Currents are in uA, times in ms. Waveforms that decide their own length
+    (pulse trains, cycles, a wavelet, one-shot shapes) get it automatically;
+    continuous ones have a Length field. Built-in waveform parameters keep
+    the meanings of PatternGenGUI.m's table, relabelled per type.
 
     ------------------------------------------------------------------
 */
@@ -34,65 +36,73 @@ public:
     /** Height needed to show every field at this width (fields wrap when narrow). */
     int preferredHeight (int width);
 
-    /** Called when the fields shown change (e.g. another waveform kind). */
+    /** Called when the height it needs changes. */
     std::function<void()> onLayoutChanged;
 
 private:
     PatternDocument& doc;
 
     Label title;
-    ComboBox presetBox, kindBox, typeBox;
-    Label labelCaption { {}, "Label" };
-    TextEditor labelEditor;
-    int headerBottom = 0;
-    int lastPreferredHeight = 0;
+    EditorButton unlinkButton { "Unlink" };
+    EditorButton deleteButton { "Delete", EditorButton::Style::Danger };
 
-    Label startLabel { {}, "Start (ms)" }, lengthLabel { {}, "Length (ms)" }, fadeInLabel { {}, "Fade in (ms)" },
-        fadeOutLabel { {}, "Fade out (ms)" };
-    TextEditor startEditor, lengthEditor, fadeInEditor, fadeOutEditor;
-    EditorButton fitButton { "Fit" };
+    ComboBox waveBox;
 
     // built-in parameters: freq, amp, offset, duty, step
     std::array<Label, 5> paramLabels;
     std::array<TextEditor, 5> paramEditors;
-    Label guide;
 
     // custom waveforms
-    Label pointsLabel { {}, "Points (ms:uA)" };
+    Label pointsLabel;
     TextEditor pointsEditor;
     ComboBox interpBox;
     ToggleButton repeatToggle { "Repeat" };
     EditorButton importButton { "Import CSV..." };
     Label samplesInfo;
     TextEditor formulaEditor;
-    Label formulaHelp;
 
-    EditorButton unlinkButton { "Unlink" };
-    EditorButton deleteButton { "Delete", EditorButton::Style::Danger };
+    // timing
+    Label startLabel { {}, "Start (ms)" }, lengthLabel { {}, "Length (ms)" }, lengthInfo;
+    TextEditor startEditor, lengthEditor;
+    Label spacingLabel { {}, "Re-space" }, everyLabel { {}, "every" }, msLabel { {}, "ms" };
+    ComboBox spacingBox;
+    TextEditor spacingStep;
+    EditorButton spacingApply { "Apply" };
+
+    // more options
+    EditorButton moreButton { "More options" };
+    Label labelCaption { {}, "Label" }, fadeInLabel { {}, "Fade in (ms)" }, fadeOutLabel { {}, "Fade out (ms)" };
+    TextEditor labelEditor, fadeInEditor, fadeOutEditor;
+    bool showMore = false;
+
+    Label help;
 
     std::unique_ptr<FileChooser> chooser;
     bool updating = false;
+    int headerBottom = 0;
+    int lastPreferredHeight = -1;
 
     void changeListenerCallback (ChangeBroadcaster*) override { refresh(); }
     void refresh();
-    void layoutForKind();
+    void updateVisibility();
     int doLayout (int width, bool apply);
 
-    /** The block shown in the fields: the first selected block, or the new-block template. */
-    const Block& shown() const;
-    bool editingTemplate() const { return doc.selectedBlocks().empty(); }
+    bool hasSelection() const { return ! doc.selectedBlocks().empty(); }
+    const Block* first() const;
+    bool spansSeveralLeds() const;
 
-    /** Applies a change to every selected block (one undo step), or to the template. */
+    /** Applies a change to every selected block as one undo step, then
+        updates fixed lengths. */
     void apply (const std::function<void (Block&)>& change);
 
     void setEditorText (TextEditor& ed, const String& text);
+    void chooseWave();
     void commitParam (int index);
-    void commitTiming (TextEditor& ed);
+    void commitStart();
+    void commitLength();
     void commitPoints();
     void commitFormula();
-    void applyPreset (int index);
-    void changeKind (WaveKind kind);
-    void importCsv();
+    void respace();
 };
 
 } // namespace PatternEditor

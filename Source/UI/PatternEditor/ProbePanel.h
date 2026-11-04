@@ -74,13 +74,16 @@ private:
     void changeListenerCallback (ChangeBroadcaster*) override { repaint (header); }
 };
 
-/** Bar above the timeline: order, step and start, Add blocks, Stagger. */
-class SequenceBar : public Component,
-                    private ChangeListener
+/** Order for a timing choice id (see addTimingChoices). */
+SequenceOrder orderForTiming (int timingId);
+
+/** Bar above the timeline: pick a waveform and a timing, then add it to the selected LEDs. */
+class AddBar : public Component,
+               private ChangeListener
 {
 public:
-    explicit SequenceBar (PatternDocument& doc);
-    ~SequenceBar() override;
+    explicit AddBar (PatternDocument& doc);
+    ~AddBar() override;
 
     void resized() override;
     void paint (Graphics& g) override;
@@ -91,21 +94,17 @@ public:
 private:
     PatternDocument& doc;
 
-    Label orderLabel { {}, "Order" }, stepLabel { {}, "Step (ms)" }, startLabel { {}, "Start (ms)" };
-    ComboBox orderBox;
-    TextEditor stepEditor, startEditor;
-    EditorButton addButton { "Add blocks", EditorButton::Style::Accent };
-    EditorButton staggerButton { "Stagger selected" };
+    Label addLabel { {}, "Add" }, everyLabel { {}, "every" }, msLabel { {}, "ms" };
+    ComboBox waveBox, timingBox;
+    TextEditor stepEditor;
+    EditorButton addButton { "Add", EditorButton::Style::Accent };
+    std::unique_ptr<FileChooser> chooser;
 
     void changeListenerCallback (ChangeBroadcaster*) override { refresh(); }
     void refresh();
-
-    int controlsWidth() const;
-    SequenceOrder order() const;
-    double stepSeconds() const;
-
+    void chooseWave();
     void addBlocks();
-    void staggerBlocks();
+    void addBlocksWith (const Block& prototype);
 };
 
 } // namespace PatternEditor

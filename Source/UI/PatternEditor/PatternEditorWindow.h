@@ -40,25 +40,23 @@ public:
     std::function<void()> onTitleChanged;
 
 private:
-    static constexpr int kToolbarHeight = 44;
-    static constexpr int kSettingsHeight = 40;
+    static constexpr int kToolbarHeight = 46;
     static constexpr int kStatusHeight = 26;
     static constexpr int kProbePanelWidth = 300;
 
     PatternDocument doc;
     std::function<void (const File&, int)> uploadCallback;
 
-    EditorButton newButton { "New" }, openButton { "Open..." }, saveButton { "Save" }, saveAsButton { "Save as..." };
-    EditorButton undoButton { "Undo" }, redoButton { "Redo" }, fitButton { "Zoom to fit" };
+    EditorButton fileButton { "File" };
+    EditorButton undoButton { "Undo" }, redoButton { "Redo" };
     Label durationLabel { {}, "Duration (s)" }, probeLabel { {}, "Probe" }, repeatLabel { {}, "Repeats" };
     TextEditor durationEditor, repeatEditor;
     ComboBox probeBox;
     Label usageLabel;
-    EditorButton exportButton { "Export .bin..." };
     EditorButton uploadButton { "Upload to board", EditorButton::Style::Accent };
 
     ProbePanel probePanel;
-    SequenceBar sequenceBar;
+    AddBar addBar;
     TimelineView timeline;
     BlockInspector inspector;
     Label statusLabel;
@@ -69,6 +67,7 @@ private:
     void changeListenerCallback (ChangeBroadcaster*) override;
     void refresh();
 
+    void showFileMenu();
     void newPattern();
     void openPattern();
     void savePattern (bool askForFile);

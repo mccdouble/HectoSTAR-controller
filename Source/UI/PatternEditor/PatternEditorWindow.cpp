@@ -37,7 +37,7 @@ String formatSeconds (double s)
 PatternEditorComponent::PatternEditorComponent (ProbeMapping initialProbe, std::function<void (const File&, int)> onUpload)
     : uploadCallback (std::move (onUpload)),
       probePanel (doc),
-      sequenceBar (doc),
+      addBar (doc),
       timeline (doc),
       inspector (doc)
 {
@@ -47,17 +47,15 @@ PatternEditorComponent::PatternEditorComponent (ProbeMapping initialProbe, std::
     p.probe = initialProbe;
     doc.reset (p, File());
 
-    for (auto* b : { &newButton, &openButton, &saveButton, &saveAsButton, &undoButton, &redoButton, &fitButton, &exportButton, &uploadButton })
+    for (auto* b : { &fileButton, &undoButton, &redoButton, &uploadButton })
         addAndMakeVisible (b);
 
-    newButton.onClick = [this] { newPattern(); };
-    openButton.onClick = [this] { openPattern(); };
-    saveButton.onClick = [this] { savePattern (false); };
-    saveAsButton.onClick = [this] { savePattern (true); };
+    fileButton.onClick = [this] { showFileMenu(); };
+    fileButton.setTooltip ("New, open, save the design (.json), export the pattern file (.bin)");
     undoButton.onClick = [this] { doc.undo(); };
     redoButton.onClick = [this] { doc.redo(); };
-    fitButton.onClick = [this] { timeline.zoomToFit(); };
-    exportButton.onClick = [this] { exportBin(); };
+    undoButton.setTooltip ("Undo (Ctrl+Z)");
+    redoButton.setTooltip ("Redo (Ctrl+Y)");
     uploadButton.onClick = [this] { upload(); };
     uploadButton.setTooltip ("Generate the pattern file and write it to the board's flash (Pattern Output is selected afterwards)");
 
@@ -112,12 +110,16 @@ PatternEditorComponent::PatternEditorComponent (ProbeMapping initialProbe, std::
     addAndMakeVisible (usageLabel);
 
     addAndMakeVisible (probePanel);
-    addAndMakeVisible (sequenceBar);
+    addAndMakeVisible (addBar);
     addAndMakeVisible (timeline);
     addAndMakeVisible (inspector);
     inspector.onLayoutChanged = [this] { resized(); };
 
     statusLabel.setFont (FontOptions (13.0f));
+    statusLabel.setTooltip ("Probe map: click / Ctrl-click / drag to select LEDs.  Timeline: click a block to select it (with its linked copies; Alt for just one), "
+                            "Shift or Ctrl to add; drag to move, drag an edge to resize (snaps to the ruler; hold Alt for single 50 us samples); "
+                            "double-click a lane to add the Add bar's waveform; double-click the ruler to fit; Ctrl+wheel zooms, Shift+wheel scrolls; "
+                            "Delete removes; Ctrl+A selects all; Ctrl+Z / Ctrl+Y undo / redo; Ctrl+S saves.");
     addAndMakeVisible (statusLabel);
 
     timeline.onLaneNameClicked = [this] (int led)
@@ -165,7 +167,7 @@ void PatternEditorComponent::refresh()
     const double maxSeconds = (double) kMaxSamples / kSampleRateHz;
     const double mb = encodedSizeBytes (p) / (1024.0 * 1024.0);
     String usage;
-    usage << String (mb, 2) << " MB of 16 MB flash (" << formatSeconds (p.duration) << " of " << formatSeconds (maxSeconds) << ")";
+    usage << "Flash: " << formatSeconds (p.duration) << " of " << formatSeconds (maxSeconds) << " (" << String (mb, 1) << " of 16 MB)";
     if (p.repeatCount > 1)
         usage << ", plays " << p.repeatCount << "x = " << formatSeconds (p.duration * p.repeatCount);
     usageLabel.setText (usage, dontSendNotification);
@@ -180,10 +182,17 @@ void PatternEditorComponent::refresh()
     }
     else
     {
-        statusLabel.setColour (Label::textColourId, findColour (ThemeColours::defaultText).withAlpha (0.7f));
-        statusLabel.setText (String ((int) p.blocks.size()) + " blocks on " + String ((int) activeLeds (p).size())
-                                 + " LEDs.  Double-click a lane to add a block; drag to move, drag an edge to resize (Alt: single samples); "
-                                   "Ctrl+wheel to zoom; Delete removes; Ctrl+Z / Ctrl+Y undo / redo.",
+        String hint;
+        if (p.blocks.empty())
+            hint = "Select LEDs on the probe map, pick a waveform in the Add bar, then click Add.";
+        else if (doc.selectedBlocks().empty())
+            hint = "Click a block to edit it. Drag to move, drag an edge to resize, Delete removes.";
+        else
+            hint = "Editing the selected blocks below. Drag to move them; Alt-drag moves by single samples.";
+
+        statusLabel.setColour (Label::textColourId, findColour (ThemeColours::defaultText).withAlpha (0.75f));
+        statusLabel.setText (String ((int) p.blocks.size()) + " blocks on " + String ((int) activeLeds (p).size()) + " LEDs.   " + hint
+                                 + "   (hover here for all shortcuts)",
                              dontSendNotification);
     }
 
@@ -195,13 +204,11 @@ void PatternEditorComponent::paint (Graphics& g)
 {
     g.fillAll (findColour (ThemeColours::componentBackground));
 
-    // toolbar and settings bands, with dividers around the panels
     g.setColour (findColour (ThemeColours::widgetBackground));
-    g.fillRect (0, 0, getWidth(), kToolbarHeight + kSettingsHeight);
+    g.fillRect (0, 0, getWidth(), kToolbarHeight);
 
     g.setColour (findColour (ThemeColours::outline));
-    g.drawHorizontalLine (kToolbarHeight, 8.0f, (float) getWidth() - 8.0f);
-    g.drawHorizontalLine (kToolbarHeight + kSettingsHeight, 0.0f, (float) getWidth());
+    g.drawHorizontalLine (kToolbarHeight, 0.0f, (float) getWidth());
     g.drawVerticalLine (probePanel.getRight(), (float) probePanel.getY(), (float) probePanel.getBottom());
     g.drawHorizontalLine (inspector.getY(), (float) inspector.getX(), (float) getWidth());
     g.drawHorizontalLine (statusLabel.getY() - 1, 0.0f, (float) getWidth());
@@ -211,38 +218,30 @@ void PatternEditorComponent::resized()
 {
     auto b = getLocalBounds();
 
-    // toolbar: file and edit actions on the left, output on the right
+    // one top row: file and undo, pattern settings, flash usage, upload
     auto bar = b.removeFromTop (kToolbarHeight).reduced (8, 7);
-    auto take = [&bar] (int w, bool right)
+    auto take = [&bar] (int w)
     {
-        auto r = right ? bar.removeFromRight (w) : bar.removeFromLeft (w);
-        return r.reduced (3, 0);
+        return bar.removeFromLeft (w).reduced (3, 0);
     };
 
-    newButton.setBounds (take (70, false));
-    openButton.setBounds (take (90, false));
-    saveButton.setBounds (take (70, false));
-    saveAsButton.setBounds (take (104, false));
-    bar.removeFromLeft (16);
-    undoButton.setBounds (take (66, false));
-    redoButton.setBounds (take (66, false));
-    fitButton.setBounds (take (116, false));
+    fileButton.setBounds (take (90));
+    undoButton.setBounds (take (66));
+    redoButton.setBounds (take (66));
+    bar.removeFromLeft (14);
 
-    uploadButton.setBounds (take (170, true));
-    exportButton.setBounds (take (140, true));
+    uploadButton.setBounds (bar.removeFromRight (170).reduced (3, 0));
 
-    // pattern settings and flash usage
-    auto settings = b.removeFromTop (kSettingsHeight).reduced (8, 6);
-    durationLabel.setBounds (settings.removeFromLeft (textWidth (durationLabel.getText()) + 12));
-    durationEditor.setBounds (settings.removeFromLeft (80).reduced (3, 0));
-    settings.removeFromLeft (14);
-    probeLabel.setBounds (settings.removeFromLeft (textWidth (probeLabel.getText()) + 12));
-    probeBox.setBounds (settings.removeFromLeft (240).reduced (3, 0));
-    settings.removeFromLeft (14);
-    repeatLabel.setBounds (settings.removeFromLeft (textWidth (repeatLabel.getText()) + 12));
-    repeatEditor.setBounds (settings.removeFromLeft (64).reduced (3, 0));
-    settings.removeFromLeft (18);
-    usageLabel.setBounds (settings);
+    durationLabel.setBounds (take (textWidth (durationLabel.getText()) + 12));
+    durationEditor.setBounds (take (72));
+    bar.removeFromLeft (8);
+    repeatLabel.setBounds (take (textWidth (repeatLabel.getText()) + 12));
+    repeatEditor.setBounds (take (56));
+    bar.removeFromLeft (8);
+    probeLabel.setBounds (take (textWidth (probeLabel.getText()) + 12));
+    probeBox.setBounds (take (jmin (240, bar.getWidth())));
+    bar.removeFromLeft (10);
+    usageLabel.setBounds (bar);
 
     statusLabel.setBounds (b.removeFromBottom (kStatusHeight).reduced (10, 0));
 
@@ -250,11 +249,37 @@ void PatternEditorComponent::resized()
     probePanel.setBounds (b.removeFromLeft (kProbePanelWidth));
     b.removeFromLeft (1);
 
-    // right: sequencing, timeline, inspector
-    sequenceBar.setBounds (b.removeFromTop (sequenceBar.preferredHeight (b.getWidth())));
+    // right: add bar, timeline, inspector
+    addBar.setBounds (b.removeFromTop (addBar.preferredHeight (b.getWidth())));
     const int inspectorH = jmin (inspector.preferredHeight (b.getWidth()), b.getHeight() / 2);
     inspector.setBounds (b.removeFromBottom (inspectorH).withTrimmedTop (1));
     timeline.setBounds (b);
+}
+
+void PatternEditorComponent::showFileMenu()
+{
+    PopupMenu menu;
+    menu.addItem (1, "New pattern");
+    menu.addItem (2, "Open design (.json)...");
+    menu.addSeparator();
+    menu.addItem (3, "Save design");
+    menu.addItem (4, "Save design as...");
+    menu.addSeparator();
+    menu.addItem (5, "Export pattern file (.bin)...");
+
+    menu.showMenuAsync (PopupMenu::Options().withTargetComponent (&fileButton),
+                        [this] (int result)
+                        {
+                            switch (result)
+                            {
+                                case 1: newPattern(); break;
+                                case 2: openPattern(); break;
+                                case 3: savePattern (false); break;
+                                case 4: savePattern (true); break;
+                                case 5: exportBin(); break;
+                                default: break;
+                            }
+                        });
 }
 
 bool PatternEditorComponent::keyPressed (const KeyPress& key)

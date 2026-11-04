@@ -7,6 +7,7 @@
 */
 
 #include "ProbePanel.h"
+#include "WaveformCatalog.h"
 
 #include <algorithm>
 #include <map>
@@ -211,131 +212,152 @@ void ProbePanel::resized()
 
 //==============================================================================
 
-SequenceBar::SequenceBar (PatternDocument& d) : doc (d)
+SequenceOrder orderForTiming (int timingId)
 {
-    for (auto* l : { &orderLabel, &stepLabel, &startLabel })
+    switch (timingId)
+    {
+        case 2: return SequenceOrder::BottomToTop;
+        case 3: return SequenceOrder::TopToBottom;
+        case 4: return SequenceOrder::ChannelOrder;
+        case 5: return SequenceOrder::ShankByShank;
+        default: return SequenceOrder::Together;
+    }
+}
+
+AddBar::AddBar (PatternDocument& d) : doc (d)
+{
+    for (auto* l : { &addLabel, &everyLabel, &msLabel })
     {
         l->setFont (FontOptions (13.0f));
-        l->setJustificationType (Justification::centredRight);
         addAndMakeVisible (l);
     }
+    addLabel.setFont (FontOptions (13.0f, Font::bold));
 
-    orderBox.addItem ("All together", 1);
-    orderBox.addItem ("Channel order", 2);
-    orderBox.addItem ("Bottom to top (by row)", 3);
-    orderBox.addItem ("Top to bottom (by row)", 4);
-    orderBox.addItem ("Shank by shank", 5);
-    orderBox.setSelectedId (3, dontSendNotification);
-    orderBox.setTooltip ("The order the LEDs start in; LEDs with the same rank start together");
-    addAndMakeVisible (orderBox);
+    addWaveChoices (waveBox, true);
+    waveBox.setSelectedId (1, dontSendNotification); // first preset
+    waveBox.setTooltip ("What to add: a preset, a waveform type, or a custom shape. Adjust it afterwards in the panel below.");
+    waveBox.onChange = [this] { chooseWave(); };
+    addAndMakeVisible (waveBox);
+
+    addTimingChoices (timingBox);
+    timingBox.setSelectedId (2, dontSendNotification);
+    timingBox.setTooltip ("Start all selected LEDs together, or one after another in this order");
+    timingBox.onChange = [this] { refresh(); };
+    addAndMakeVisible (timingBox);
 
     stepEditor.setText ("10");
-    startEditor.setText ("0");
-    stepEditor.setTooltip ("Time between successive LEDs (ranks) in the order");
-    startEditor.setTooltip ("When the first LED starts");
-    for (auto* t : { &stepEditor, &startEditor })
-    {
-        t->setInputRestrictions (12, "0123456789.");
-        t->setJustification (Justification::centredRight);
-        addAndMakeVisible (t);
-    }
+    stepEditor.setInputRestrictions (12, "0123456789.");
+    stepEditor.setJustification (Justification::centredRight);
+    stepEditor.setTooltip ("Time between LEDs (LEDs in the same row or shank start together)");
+    addAndMakeVisible (stepEditor);
 
-    addButton.setTooltip ("Add the new-block settings (inspector, with nothing selected) to every selected LED, offset by the step in this order");
-    staggerButton.setTooltip ("Re-space the selected blocks by the step in this order, keeping the earliest start");
     addButton.onClick = [this] { addBlocks(); };
-    staggerButton.onClick = [this] { staggerBlocks(); };
     addAndMakeVisible (addButton);
-    addAndMakeVisible (staggerButton);
 
+    chooseWave();
     doc.addChangeListener (this);
     refresh();
 }
 
-SequenceBar::~SequenceBar()
+AddBar::~AddBar()
 {
     doc.removeChangeListener (this);
 }
 
-void SequenceBar::refresh()
+void AddBar::chooseWave()
+{
+    // what "Add" and double-clicking a lane will place
+    const int id = waveBox.getSelectedId();
+    if (id <= 0)
+        return;
+    const WaveChoice& c = waveChoices()[(std::size_t) id - 1];
+
+    Block& t = doc.newBlockTemplate;
+    t.wave = c.wave;
+    t.label = c.label;
+    t.fadeIn = t.fadeOut = 0;
+    t.length = doc.pattern().duration;
+    updateFixedLength (t);
+}
+
+void AddBar::refresh()
 {
     const int leds = (int) doc.selectedLeds().size();
-    addButton.setLabel (leds == 0 ? String ("Add blocks (select LEDs)") : "Add blocks to " + String (leds) + (leds == 1 ? " LED" : " LEDs"));
+    addButton.setLabel (leds == 0 ? String ("Select LEDs to add") : "Add to " + String (leds) + (leds == 1 ? " LED" : " LEDs"));
     addButton.setActive (leds > 0);
-    staggerButton.setActive (doc.selectedBlocks().size() > 1);
     addButton.repaint();
+
+    const bool staggered = timingIsStaggered (timingBox.getSelectedId()) && leds != 1;
+    everyLabel.setVisible (staggered);
+    stepEditor.setVisible (staggered);
+    msLabel.setVisible (staggered);
 }
 
-int SequenceBar::controlsWidth() const
+int AddBar::preferredHeight (int width) const
 {
-    // order + step + start
-    return 56 + 210 + 84 + 70 + 92 + 70 + 12;
+    return width - 20 >= 40 + 330 + 240 + 50 + 70 + 30 + 220 ? 44 : 78;
 }
 
-int SequenceBar::preferredHeight (int width) const
-{
-    return (width - 20 >= controlsWidth() + 240 + 170) ? 44 : 78;
-}
-
-void SequenceBar::paint (Graphics& g)
+void AddBar::paint (Graphics& g)
 {
     g.fillAll (findColour (ThemeColours::widgetBackground));
     g.setColour (findColour (ThemeColours::outline));
     g.drawHorizontalLine (getHeight() - 1, 0.0f, (float) getWidth());
 }
 
-void SequenceBar::resized()
+void AddBar::resized()
 {
     auto b = getLocalBounds().reduced (10, 8);
     const bool oneRow = getHeight() < 60;
 
     auto row = b.removeFromTop (28);
-    orderLabel.setBounds (row.removeFromLeft (56));
-    orderBox.setBounds (row.removeFromLeft (210).reduced (3, 0));
-    stepLabel.setBounds (row.removeFromLeft (84));
+    addLabel.setBounds (row.removeFromLeft (40));
+    waveBox.setBounds (row.removeFromLeft (jmin (330, row.getWidth())).reduced (3, 0));
+    row.removeFromLeft (8);
+    timingBox.setBounds (row.removeFromLeft (jmin (240, row.getWidth())).reduced (3, 0));
+    everyLabel.setBounds (row.removeFromLeft (50));
     stepEditor.setBounds (row.removeFromLeft (70).reduced (3, 0));
-    startLabel.setBounds (row.removeFromLeft (92));
-    startEditor.setBounds (row.removeFromLeft (70).reduced (3, 0));
+    msLabel.setBounds (row.removeFromLeft (30));
 
     if (! oneRow)
     {
         b.removeFromTop (6);
         row = b.removeFromTop (28);
     }
-    else
+
+    addButton.setBounds (row.removeFromRight (jmin (220, row.getWidth())).reduced (3, 0));
+}
+
+void AddBar::addBlocks()
+{
+    if (doc.selectedLeds().empty())
+        return;
+
+    Block prototype = doc.newBlockTemplate;
+
+    if (prototype.wave.kind == WaveKind::Samples && prototype.wave.samples.empty())
     {
-        row.removeFromLeft (12);
+        chooseSamplesFile (chooser, [this, prototype] (std::vector<double> values, std::string name) mutable
+                           {
+                               prototype.wave.samples = std::move (values);
+                               prototype.label = name;
+                               updateFixedLength (prototype);
+                               addBlocksWith (prototype);
+                           });
+        return;
     }
 
-    staggerButton.setBounds (row.removeFromRight (170).reduced (3, 0));
-    addButton.setBounds (row.removeFromRight (jmin (260, row.getWidth())).reduced (3, 0));
+    addBlocksWith (prototype);
 }
 
-SequenceOrder SequenceBar::order() const
-{
-    switch (orderBox.getSelectedId())
-    {
-        case 1: return SequenceOrder::Together;
-        case 2: return SequenceOrder::ChannelOrder;
-        case 4: return SequenceOrder::TopToBottom;
-        case 5: return SequenceOrder::ShankByShank;
-        default: return SequenceOrder::BottomToTop;
-    }
-}
-
-double SequenceBar::stepSeconds() const
-{
-    return std::max (0.0, stepEditor.getText().getDoubleValue() / 1000.0);
-}
-
-void SequenceBar::addBlocks()
+void AddBar::addBlocksWith (const Block& prototype)
 {
     const std::vector<int> leds (doc.selectedLeds().begin(), doc.selectedLeds().end());
     if (leds.empty())
         return;
 
-    const auto ranks = sequenceRanks (leds, order());
-    const double step = stepSeconds();
-    const double start = std::max (0.0, startEditor.getText().getDoubleValue() / 1000.0);
+    const auto ranks = sequenceRanks (leds, orderForTiming (timingBox.getSelectedId()));
+    const double step = std::max (0.0, stepEditor.getText().getDoubleValue() / 1000.0);
 
     std::set<int> added;
     doc.modify ([&] (Pattern& p)
@@ -350,52 +372,20 @@ void SequenceBar::addBlocks()
 
                     for (std::size_t i = 0; i < leds.size(); ++i)
                     {
-                        Block b = doc.newBlockTemplate;
+                        Block b = prototype;
                         b.id = nextBlockId (p);
                         b.led = leds[i];
-                        b.start = start + ranks[i] * step;
+                        b.start = ranks[i] * step;
                         b.link = link;
+                        if (! hasFixedLength (b.wave))
+                            b.length = std::max (1.0 / kSampleRateHz, p.duration - b.start);
                         p.blocks.push_back (b);
                         added.insert (b.id);
                     }
                 });
+
+    // select what was added so the panel below edits it
     doc.setSelectedBlocks (added);
-}
-
-void SequenceBar::staggerBlocks()
-{
-    const auto sel = doc.selectedBlocks();
-    if (sel.size() < 2)
-        return;
-
-    // earliest selected block per LED; each LED's blocks shift together
-    std::map<int, double> firstStart;
-    double base = 1.0e300;
-    for (const auto& b : doc.pattern().blocks)
-    {
-        if (sel.count (b.id) == 0)
-            continue;
-        auto it = firstStart.find (b.led);
-        firstStart[b.led] = (it == firstStart.end()) ? b.start : std::min (it->second, b.start);
-        base = std::min (base, b.start);
-    }
-
-    std::vector<int> leds;
-    for (const auto& kv : firstStart)
-        leds.push_back (kv.first);
-    const auto ranks = sequenceRanks (leds, order());
-    const double step = stepSeconds();
-
-    std::map<int, double> shift;
-    for (std::size_t i = 0; i < leds.size(); ++i)
-        shift[leds[i]] = base + ranks[i] * step - firstStart[leds[i]];
-
-    doc.modify ([&] (Pattern& p)
-                {
-                    for (auto& b : p.blocks)
-                        if (sel.count (b.id) > 0)
-                            b.start = std::max (0.0, b.start + shift[b.led]);
-                });
 }
 
 } // namespace PatternEditor

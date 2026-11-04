@@ -7,6 +7,7 @@
 */
 
 #include "TimelineView.h"
+#include "WaveformCatalog.h"
 
 #include <cmath>
 
@@ -279,8 +280,7 @@ void TimelineView::paintLane (Graphics& g, int index, int led)
         g.setColour (sel ? accent : accent.withAlpha (0.6f));
         g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, sel ? 2.0f : 1.0f);
 
-        String label = b.label.empty() ? String (b.wave.kind == WaveKind::Builtin ? waveTypeName (b.wave.builtin.type) : waveKindName (b.wave.kind))
-                                       : String::fromUTF8 (b.label.c_str());
+        String label = b.label.empty() ? waveDisplayName (b.wave) : String::fromUTF8 (b.label.c_str());
         if (b.link != 0)
             label << "  (linked)";
         g.setColour (text.withAlpha (0.85f));
@@ -487,6 +487,12 @@ void TimelineView::mouseUp (const MouseEvent&)
 
 void TimelineView::mouseDoubleClick (const MouseEvent& e)
 {
+    if (e.y < kRulerHeight)
+    {
+        zoomToFit();
+        return;
+    }
+
     const int index = laneIndexAt (e.y);
     if (index < 0 || e.x < kNameWidth || hitTest (e.position).blockId != 0)
         return;
@@ -502,6 +508,8 @@ void TimelineView::mouseDoubleClick (const MouseEvent& e)
                     b.led = led;
                     b.start = t;
                     b.link = 0;
+                    if (naturalLength (b.wave) <= 0)
+                        b.length = std::max (1.0 / kSampleRateHz, p.duration - t);
                     p.blocks.push_back (b);
                 });
     doc.setSelectedBlocks ({ newId });
