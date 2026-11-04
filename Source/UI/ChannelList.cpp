@@ -28,7 +28,8 @@
 #include "../DeviceEditor.h"
 #include "../DeviceThread.h"
 #include "../Headstage.h"
-#include "PatternEditor/PatternEditorWindow.h"
+#include "PatternEditor/PatternPanel.h"
+#include "PatternEditor/WaveformViews.h"
 
 using namespace RhythmNode;
 
@@ -87,124 +88,241 @@ private:
     double progress = 0.0; // read by the ProgressBar on the message thread
 };
 
-ChannelList::~ChannelList() = default;
+namespace
+{
+
+// probe drawing geometry (paint() and the LED positions share it)
+constexpr float kProbeX = 55.0f;  // left of the first shank
+constexpr float kProbeY = 82.0f;  // top of the shanks
+constexpr float kShankW = 90.0f;
+constexpr float kShankH = 500.0f;
+constexpr float kShankGap = 16.0f;
+constexpr int kProbeColumnW = 495; // the settings panel starts right of this
+constexpr int kTopBarH = 46;
+
+Colour ledColour() { return Colour (0xff4169e1); } // royal blue, like the pulse-mode ticks
+
+} // namespace
+
+/** Pattern mode: draws the LEDs on the probe (filled when they have a
+    waveform, ringed when selected) and selects them: click, Ctrl/Cmd-click
+    to toggle, Shift-click to add, drag across LEDs to add them. */
+class ChannelList::ProbeLedOverlay : public Component,
+                                     public TooltipClient,
+                                     private ChangeListener
+{
+public:
+    ProbeLedOverlay (ChannelList& owner_, PatternEditor::PatternDocument& d) : owner (owner_), doc (d)
+    {
+        doc.addChangeListener (this);
+    }
+
+    ~ProbeLedOverlay() override { doc.removeChangeListener (this); }
+
+    void paint (Graphics& g) override
+    {
+        std::set<int> used;
+        for (int led : PatternGen::activeLeds (doc.pattern()))
+            used.insert (led);
+
+        for (int i = 0; i < owner.visibleLeds(); ++i)
+        {
+            const int led = i + 1;
+            const auto c = owner.ledCentre (i);
+            const juce::Rectangle<float> r (c.x - 9.0f, c.y - 9.0f, 18.0f, 18.0f);
+            const bool isSel = doc.selectedLeds().count (led) > 0;
+
+            if (isSel)
+            {
+                g.setColour (Colours::white);
+                g.fillEllipse (r.expanded (4.0f));
+            }
+
+            g.setColour (used.count (led) > 0 ? ledColour() : Colours::white.withAlpha (0.35f));
+            g.fillEllipse (r);
+            g.setColour (Colours::black.withAlpha (0.8f));
+            g.drawEllipse (r, isSel ? 2.0f : 1.2f);
+        }
+
+        g.setColour (Colours::black);
+        g.setFont (FontOptions (12.0f));
+        g.drawText ("Click LEDs to select them (Ctrl-click or drag for more). Blue = has a waveform.",
+                    10, (int) (kProbeY + kShankH + 8), kProbeColumnW - 20, 16, Justification::centredLeft);
+    }
+
+    void mouseDown (const MouseEvent& e) override
+    {
+        const int led = ledAt (e.position);
+        auto sel = doc.selectedLeds();
+        const auto mods = e.mods;
+
+        if (led == 0)
+        {
+            if (! mods.isCommandDown() && ! mods.isShiftDown())
+                select ({});
+            dragAdds = false;
+            return;
+        }
+
+        if (mods.isCommandDown())
+        {
+            if (sel.count (led) > 0)
+                sel.erase (led);
+            else
+                sel.insert (led);
+        }
+        else if (mods.isShiftDown())
+            sel.insert (led);
+        else
+            sel = { led };
+
+        dragAdds = true;
+        select (sel);
+    }
+
+    void mouseDrag (const MouseEvent& e) override
+    {
+        if (! dragAdds)
+            return;
+        const int led = ledAt (e.position);
+        if (led != 0 && doc.selectedLeds().count (led) == 0)
+        {
+            auto sel = doc.selectedLeds();
+            sel.insert (led);
+            select (sel);
+        }
+    }
+
+    void mouseMove (const MouseEvent& e) override { hovered = ledAt (e.position); }
+
+    String getTooltip() override
+    {
+        if (hovered == 0)
+            return {};
+        const int row = PatternEditor::rowFromBottom (hovered) + 1;
+        return "LED " + String (hovered) + " (shank " + String (PatternEditor::shankOf (hovered)) + ", " + String (row)
+               + (row == 1 ? "st" : row == 2 ? "nd" : row == 3 ? "rd" : "th") + " from the tip)";
+    }
+
+    bool hitTest (int, int y) override { return y >= kTopBarH; } // leave the top bar to its controls
+
+private:
+    ChannelList& owner;
+    PatternEditor::PatternDocument& doc;
+    bool dragAdds = false;
+    int hovered = 0;
+
+    void changeListenerCallback (ChangeBroadcaster*) override { repaint(); }
+
+    void select (std::set<int> leds)
+    {
+        doc.setSelectedBlocks ({});
+        doc.setSelectedLeds (std::move (leds));
+    }
+
+    int ledAt (Point<float> p) const
+    {
+        for (int i = 0; i < owner.visibleLeds(); ++i)
+            if (owner.ledCentre (i).getDistanceFrom (p) <= 12.0f)
+                return i + 1;
+        return 0;
+    }
+};
+
+ChannelList::~ChannelList()
+{
+    if (patternDoc != nullptr)
+        patternDoc->removeChangeListener (this);
+}
 
 ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (board_), editor (editor_), maxChannels (0)
 {
     channelComponents.clear();
 
-    //Probe Geometry Selection 
-
-
-    //label for stim output selection (Pulse or Pattern).
+    //Probe Geometry Selection
     probeTypeSelect = std::make_unique<ComboBox> ("Probe Select");
     probeTypeSelect->addItem ("4-Shank Chronic", 1);
     probeTypeSelect->addItem ("2-Shank Chronic", 2);
     probeTypeSelect->addItem ("4-Shank Acute", 3);
     probeTypeSelect->addItem ("Demo Board", 4);
-
-    //add in future, all other possible configs.
-
-    probeTypeSelect->setBounds (10, 10, 100, 25);
+    probeTypeSelect->setTooltip ("Probe on the headstage: sets the drawing and the LED channel mapping");
     probeTypeSelect->addListener (this);
     probeTypeSelect->setSelectedId (1, dontSendNotification);
     addAndMakeVisible (probeTypeSelect.get());
 
-    //Output Selection Button
-    outputTypeSelect = std::make_unique<ComboBox> ("Output Selection");
-    outputTypeSelect->addItem ("Pulse Output", 1);
-    outputTypeSelect->addItem ("Pattern Output", 2);
-    outputTypeSelect->setBounds (125, 10, 140, 25);
-    outputTypeSelect->addListener (this);
-    outputTypeSelect->setSelectedId (1, dontSendNotification);
-    addAndMakeVisible (outputTypeSelect.get());
-    selectedStimOutputType = 0; //set default output.
+    //output mode: pulse or pattern (also switches the board's output)
+    pulseModeButton = std::make_unique<ColourButton> ("Pulse", FontOptions (14.0f));
+    pulseModeButton->setTooltip ("One pulse train on every ticked LED");
+    pulseModeButton->addListener (this);
+    addAndMakeVisible (pulseModeButton.get());
+    patternModeButton = std::make_unique<ColourButton> ("Pattern", FontOptions (14.0f));
+    patternModeButton->setTooltip ("Each LED plays its own waveform, from a pattern stored on the board");
+    patternModeButton->addListener (this);
+    addAndMakeVisible (patternModeButton.get());
 
-    //upload stim parameters
-    uploadStimParamButton = std::make_unique<ColourButton> ("Upload Stim Parameters", FontOptions (14.0f));
-    uploadStimParamButton->setBounds (270, 10, 170, 25);
+    //trigger select (PC, EXTERNAL), shared by both modes
+    triggerLabel = std::make_unique<Label> ("Trigger Label", "Trigger");
+    triggerLabel->setJustificationType (Justification::centredRight);
+    addAndMakeVisible (triggerLabel.get());
+    triggerSelectBox = std::make_unique<ComboBox> ("Trigger Type");
+    triggerSelectBox->addItem ("PC", 1);
+    triggerSelectBox->addItem ("TTL IN 0", 2);
+    triggerSelectBox->addListener (this);
+    triggerSelectBox->setSelectedId (1, dontSendNotification);
+    triggerSelectBox->setTooltip ("What starts the stimulation: the Start Stim button (PC) or a TTL input");
+    addAndMakeVisible (triggerSelectBox.get());
+
+    //upload: pulse settings, or the pattern
+    uploadStimParamButton = std::make_unique<ColourButton> ("Upload pulse settings", FontOptions (14.0f));
     uploadStimParamButton->addListener (this);
     addAndMakeVisible (uploadStimParamButton.get());
 
-    
-    selectPatternFileButton = std::make_unique<ColourButton> ("Select Pattern Stim File", FontOptions (14.0f));
-    selectPatternFileButton->setBounds (445, 10, 170, 25);
-    selectPatternFileButton->addListener (this);
-    addAndMakeVisible (selectPatternFileButton.get());
+    //pulse mode settings
+    pulseHeader = std::make_unique<Label> ("Pulse Header", "Pulse output");
+    pulseHeader->setFont (FontOptions (15.0f, Font::bold));
+    addAndMakeVisible (pulseHeader.get());
 
-    //pulse count
-    patternRepeatCount = std::make_unique<TextEditor> ("Pattern Repeat Count");
-    patternRepeatCount->setText ("1");
-    patternRepeatCount->setBounds (625, 10, 40, 25);
-    //patternRepeatCount->addListener(this);
-    addAndMakeVisible (patternRepeatCount.get());
+    for (const char* text : { "Amplitude (uA)", "Period (ms)", "Pulse width (ms)", "Rise/fall time", "Pulses" })
+    {
+        auto* l = pulseLabels.add (new Label ({}, String (text).replace ("uA", String::fromUTF8 ("\xc2\xb5" "A"))));
+        l->setJustificationType (Justification::centredRight);
+        addAndMakeVisible (l);
+    }
 
-    //count label
-    //waveform input labels
-    repeatLabel = std::make_unique<Label> ("Repeat Label", "Count");
-    repeatLabel->setEditable (false);
-    repeatLabel->setBounds (675, 10, 50, 25);
-    addAndMakeVisible (repeatLabel.get());
+    auto makeInput = [this] (const String& name)
+    {
+        auto ed = std::make_unique<TextEditor> (name);
+        ed->setText ("0");
+        ed->setJustification (Justification::centredRight);
+        ed->setInputRestrictions (8, "0123456789");
+        ed->onTextChange = [this] { updatePulsePreview(); };
+        addAndMakeVisible (ed.get());
+        return ed;
+    };
+    amplitudeInput = makeInput ("Amplitude");
+    periodInput = makeInput ("Period");
+    pulseWidthInput = makeInput ("Pulse Width");
+    pulseCountInput = makeInput ("Pulse Count");
 
-    //opens the pattern editor window (build, save, export and upload patterns)
-    patternEditorButton = std::make_unique<ColourButton> ("Pattern Editor...", FontOptions (14.0f));
-    patternEditorButton->setBounds (730, 10, 150, 25);
-    patternEditorButton->addListener (this);
-    addAndMakeVisible (patternEditorButton.get());
-
-    //waveform input labels
-    waveformInputLabel = std::make_unique<Label> ("Waveform Labels", "Amplitude(uA)    Period(ms)     Pulse Width(ms)    Rise/Fall Time    #Pulses   Trigger Type");
-    waveformInputLabel->setEditable (false);
-    waveformInputLabel->setBounds (10, 50, 800, 25);
-    addAndMakeVisible (waveformInputLabel.get());
-
-    //amplitude
-    amplitudeInput = std::make_unique<TextEditor> ("Amplitude");
-    amplitudeInput->setText ("0");
-    amplitudeInput->setBounds (30, 75, 50, 25);
-    addAndMakeVisible (amplitudeInput.get());
-
-    //period
-    periodInput = std::make_unique<TextEditor> ("Period");
-    periodInput->setText ("0");
-    periodInput->setBounds (150, 75, 50, 25);
-    addAndMakeVisible (periodInput.get());
-
-    //pulse width
-    pulseWidthInput = std::make_unique<TextEditor> ("Pulse Width");
-    pulseWidthInput->setText ("0");
-    pulseWidthInput->setBounds (280, 75, 50, 25);
-    addAndMakeVisible (pulseWidthInput.get());
-
-    //edgeSelect
     edgeSelectBox = std::make_unique<ComboBox> ("Edge Select");
     edgeSelectBox->addItem ("0 ms", 1);
     edgeSelectBox->addItem ("0.1 ms", 2);
     edgeSelectBox->addItem ("0.5 ms", 3);
     edgeSelectBox->addItem ("1 ms", 4);
     edgeSelectBox->addItem ("2 ms", 5);
-    edgeSelectBox->setBounds (400, 75, 80, 25);
     edgeSelectBox->addListener (this);
     edgeSelectBox->setSelectedId (1, dontSendNotification);
     addAndMakeVisible (edgeSelectBox.get());
 
-    //pulse count
-    pulseCountInput = std::make_unique<TextEditor> ("Pulse Count");
-    pulseCountInput->setText ("0");
-    pulseCountInput->setBounds (530, 75, 50, 25);
-    addAndMakeVisible (pulseCountInput.get());
+    pulseHelp = std::make_unique<Label> ("Pulse Help",
+                                         "Tick the LEDs on the probe that should pulse, then click Upload pulse settings. "
+                                         "Start Stim (or the TTL trigger) plays it.");
+    pulseHelp->setJustificationType (Justification::topLeft);
+    addAndMakeVisible (pulseHelp.get());
 
-    //trigger select (PC, EXTERNAL)
-    triggerSelectBox = std::make_unique<ComboBox> ("Trigger Type");
-    triggerSelectBox->addItem("PC", 1);
-    triggerSelectBox->addItem("TTL IN 0", 2);
-    //triggerSelectBox->addItem("TTL IN 1", 2);
-    //triggerSelectBox->addItem("TTL IN 2", 3);
-    //triggerSelectBox->addItem("TTL IN 3", 4);
-    triggerSelectBox->setBounds(610, 75, 80, 25);
-    triggerSelectBox->addListener(this);
-    triggerSelectBox->setSelectedId(1, dontSendNotification);
-    addAndMakeVisible (triggerSelectBox.get());
+    pulsePreview = std::make_unique<PatternEditor::WaveformPreview>();
+    pulsePreview->setWhole (true);
+    addAndMakeVisible (pulsePreview.get());
 
     //Initialize the led toggle buttons
     for (int i = 0; i < 64; ++i)
@@ -218,12 +336,22 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
         addAndMakeVisible (toggleButtons[i].get());
     }
 
-    patternOutputLabel = std::make_unique<Label> ("Output Type Alert");
-    patternOutputLabel->setText ("Pattern Output is Selected!!", juce::dontSendNotification);
-    patternOutputLabel->setJustificationType (juce::Justification::centred);
-    patternOutputLabel->setBounds (112, 300, 200, 30);
-    addAndMakeVisible(patternOutputLabel.get()); 
-    patternOutputLabel->setVisible (false); // Starts hidden!
+    //pattern mode
+    patternDoc = std::make_unique<PatternEditor::PatternDocument>();
+    patternDoc->setProbe (PatternGen::ProbeMapping::FourShankChronic);
+    patternDoc->addChangeListener (this);
+
+    patternPanel = std::make_unique<PatternEditor::PatternPanel> (*patternDoc);
+    patternPanel->onUploadBinFile = [this] (const File& f) { uploadPatternFile (f); };
+    patternPanel->onPatternReplaced = [this]
+    {
+        // the probe on the headstage wins over the one saved in the design
+        patternDoc->setProbe ((PatternGen::ProbeMapping) jlimit (1, 4, probeTypeSelect->getSelectedId()));
+    };
+    addChildComponent (patternPanel.get());
+
+    ledOverlay = std::make_unique<ProbeLedOverlay> (*this, *patternDoc);
+    addChildComponent (ledOverlay.get());
 
     //measures impedance (on acute configurations only).
     impedanceButton = std::make_unique<UtilityButton> ("Measure Impedances");
@@ -241,168 +369,283 @@ ChannelList::ChannelList (DeviceThread* board_, DeviceEditor* editor_) : board (
     saveImpedanceButton->setEnabled (false);
     //addAndMakeVisible (saveImpedanceButton.get());
 
+    setOutputMode (false);
+    updatePulsePreview();
+    updateBoardStatus();
     update();
 }
 
 void ChannelList::lookAndFeelChanged()
-{   
+{
+    const bool pattern = selectedStimOutputType != 0;
+    const Colour text = findColour (ThemeColours::defaultText);
+    const Colour on = findColour (ThemeColours::highlightedFill);
+    const Colour off = findColour (ThemeColours::defaultFill);
 
-    //probably put the color selections here, make the default colors changed upon the theme color changing from editior,   
-
-    //outputTypeLabel->setColour (Label::textColourId, findColour (ThemeColours::defaultText));
-    uploadStimParamButton->setColours (findColour (ThemeColours::defaultText), findColour (ThemeColours::highlightedFill));  
-    selectPatternFileButton->setColours (findColour (ThemeColours::defaultText), findColour (ThemeColours::defaultFill));
-    patternEditorButton->setColours (findColour (ThemeColours::defaultText), findColour (ThemeColours::defaultFill));
-  
+    uploadStimParamButton->setColours (text, on);
+    pulseModeButton->setColours (text, pattern ? off : on);
+    patternModeButton->setColours (text, pattern ? on : off);
 
     for (int i = 0; i < 64; ++i)
     {
         toggleButtons[i]->setColour (ToggleButton::ColourIds::tickDisabledColourId, Colours::darkgrey);
-        toggleButtons[i]->setColour (ToggleButton::ColourIds::tickColourId, Colours::royalblue);
+        toggleButtons[i]->setColour (ToggleButton::ColourIds::tickColourId, ledColour());
     }
 
-    //alert window
-    patternOutputLabel->setColour (juce::Label::textColourId, juce::Colours::white);
-    patternOutputLabel->setColour (juce::Label::backgroundColourId, juce::Colours::darkred);
-    patternOutputLabel->setFont (juce::Font (16.0f, juce::Font::bold));
-
-    //numberingSchemeLabel->setColour (Label::textColourId, findColour (ThemeColours::defaultText));
-
+    for (auto* l : { triggerLabel.get(), pulseHeader.get(), pulseHelp.get() })
+        l->setColour (Label::textColourId, Colours::black);
+    for (auto* l : pulseLabels)
+        l->setColour (Label::textColourId, Colours::black);
 
     update();
 }
 
-void ChannelList::buttonClicked (Button* btn)
+void ChannelList::setOutputMode (bool pattern)
 {
-  
-    
-    //UPLOAD ENABLED LEDS AND WAVEFORM PARAMETERS
-    //update the LED toggle buttons
+    selectedStimOutputType = pattern ? 1 : 0;
+    if (board->foundInputSource())
+        board->setStimOutputType (selectedStimOutputType);
+
+    for (Component* c : { (Component*) pulseHeader.get(), (Component*) amplitudeInput.get(), (Component*) periodInput.get(),
+                          (Component*) pulseWidthInput.get(), (Component*) edgeSelectBox.get(), (Component*) pulseCountInput.get(),
+                          (Component*) pulseHelp.get(), (Component*) pulsePreview.get() })
+        c->setVisible (! pattern);
+    for (auto* l : pulseLabels)
+        l->setVisible (! pattern);
 
     for (int i = 0; i < 64; ++i)
+        toggleButtons[i]->setVisible (! pattern && i < visibleLeds());
+
+    patternPanel->setVisible (pattern);
+    ledOverlay->setVisible (pattern);
+
+    uploadStimParamButton->setLabel (pattern ? "Upload pattern" : "Upload pulse settings");
+    uploadStimParamButton->setTooltip (pattern ? "Write the pattern to the board (if it changed) and set the repeat count"
+                                               : "Send the pulse settings and ticked LEDs to the board");
+
+    lookAndFeelChanged();
+    resized();
+    repaint();
+}
+
+int ChannelList::visibleLeds() const
+{
+    const int lanes = (shankCount == 1 ? 2 : 4);
+    return jmin (64, lanes * 16);
+}
+
+Point<float> ChannelList::ledCentre (int index) const
+{
+    const int lane = index / 16;
+    const int j = index % 16;
+    const float yTop = kProbeY + 5.0f;
+    const float yBottom = kProbeY + 470.0f;
+    const float step = (yBottom - yTop) / 16.0f;
+    return { kProbeX + lane * (kShankW + kShankGap) + kShankW * 0.5f - 2.0f, yBottom - (j + 0.5f) * step };
+}
+
+void ChannelList::resized()
+{
+    const int W = getWidth();
+    const int H = getHeight();
+
+    // top bar: probe, mode, trigger, upload
+    probeTypeSelect->setBounds (10, 10, 150, 26);
+    pulseModeButton->setBounds (172, 10, 90, 26);
+    patternModeButton->setBounds (264, 10, 90, 26);
+    triggerLabel->setBounds (364, 10, 64, 26);
+    triggerSelectBox->setBounds (430, 10, 100, 26);
+    uploadStimParamButton->setBounds (544, 10, 190, 26);
+
+    // LEDs on the probe drawing
+    for (int i = 0; i < 64; ++i)
     {
-        if (btn == toggleButtons[i].get())
-        {
-            // Handle button click
-            bool isToggled = toggleButtons[i]->getToggleState();
-        }
+        const auto c = ledCentre (i);
+        toggleButtons[i]->setBounds ((int) std::round (c.x - 10.0f), (int) std::round (c.y - 10.0f), 20, 20);
+    }
+    ledOverlay->setBounds (0, 0, kProbeColumnW, H); // same coordinates as the drawing
+
+    // settings beside the probe
+    const int x0 = kProbeColumnW + 10;
+    patternPanel->setBounds (x0, kTopBarH + 4, jmax (300, W - x0 - 10), jmax (300, H - kTopBarH - 14));
+
+    pulseHeader->setBounds (x0, kTopBarH + 10, 300, 24);
+    Component* fields[] = { amplitudeInput.get(), periodInput.get(), pulseWidthInput.get(), edgeSelectBox.get(), pulseCountInput.get() };
+    for (int i = 0; i < 5; ++i)
+    {
+        const int y = kTopBarH + 42 + i * 32;
+        pulseLabels[i]->setBounds (x0, y, 130, 26);
+        fields[i]->setBounds (x0 + 136, y, 90, 26);
+    }
+    const int previewX = x0 + 250;
+    pulsePreview->setBounds (previewX, kTopBarH + 42, jlimit (260, 520, W - previewX - 20), 154);
+    pulseHelp->setBounds (x0, kTopBarH + 42 + 5 * 32 + 6, jmin (700, W - x0 - 20), 40);
+}
+
+void ChannelList::updatePulsePreview()
+{
+    PatternGen::Block b;
+    b.wave.kind = PatternGen::WaveKind::Shaped;
+    auto& t = b.wave.shaped;
+    t.shape = PatternGen::PulseShape::Square;
+    t.amp = amplitudeInput->getText().getIntValue();
+    t.width = jmax (1, pulseWidthInput->getText().getIntValue()) / 1000.0;
+    t.count = jmax (1, pulseCountInput->getText().getIntValue());
+    const int periodMs = periodInput->getText().getIntValue();
+    t.rate = periodMs > 0 ? 1000.0 / periodMs : 1.0;
+    b.length = PatternGen::naturalLength (b.wave);
+    pulsePreview->setBlock (b);
+}
+
+void ChannelList::buttonClicked (Button* btn)
+{
+    if (btn == pulseModeButton.get())
+    {
+        setOutputMode (false);
+        return;
+    }
+    if (btn == patternModeButton.get())
+    {
+        setOutputMode (true);
+        return;
     }
 
     if (btn == uploadStimParamButton.get())
     {
-        //upload the stimulation parameters saved in the
-        //This structure should be updated upon       //any change to the UI elements.
         LOGD ("UPLOAD STIM PARAMS PRESSED")
 
-        //set which output type to use
-        board->setStimOutputType(selectedStimOutputType);
-
-        //pulse stim selected
-        if (!selectedStimOutputType)
+        if (selectedStimOutputType != 0)
         {
-            LOGD ("Pulse Output Selected")
-            //get all text entries for waveform at stim
-            amplitude = amplitudeInput->getTextValue().toString().getIntValue();
-            period = periodInput->getTextValue().toString().getIntValue();
-            pulse_width = pulseWidthInput->getTextValue().toString().getIntValue();
-            edge_sel = edgeSelectBox->getComponentID().getIntValue();
-            pulse_count = pulseCountInput->getTextValue().toString().getIntValue();
-
-            //check the enabled buttons for which LEDs to output to
-
-            int enabledLEDS[64];
-            for (int i = 0; i < 64; ++i)
-            {
-                if (toggleButtons[i]->getToggleState())
-                {
-                    enabledLEDS[ledMapping[i]] = 1;
-                }
-                else
-                {
-                    enabledLEDS[ledMapping[i]] = 0;
-                }
-            }
-
-            //trig source is 0 indexed on fpga
-            board->uploadStimParameters (amplitude, period, pulse_width, edge_sel, pulse_count, (trig_source-1), enabledLEDS);
-        }
-        //pattern stim is selected
-        else
-        {
-            LOGD ("Pattern Output Selected")
-            repeatCount = (patternRepeatCount->getTextValue().toString().getIntValue()) - 1;
-            board->setPatternStimRepeatCount(repeatCount);
+            uploadPattern();
+            return;
         }
 
-        //TEMP BUTTON TO SET THE REPEAT COUNT
-    }
-    //PATTERN STIMULATION BUTTON
-    if (btn == selectPatternFileButton.get())
-    {
-        LOGD ("SELECT FILE BUTTON CLICKED")
-
-        FileChooser fileChooser ("Please select a stimulation pattern file...");
-
-        //opens documents folder
-        if (fileChooser.browseForFileToOpen())
-
+        if (! board->foundInputSource())
         {
-            beginPatternUpload (fileChooser.getResult(), nullptr);
-        }
-    }
-
-    //PATTERN EDITOR
-    if (btn == patternEditorButton.get())
-    {
-        if (patternEditorWindow == nullptr)
-        {
-            Component::SafePointer<ChannelList> safeThis (this);
-            const auto probe = (PatternGen::ProbeMapping) jlimit (1, 4, probeTypeSelect->getSelectedId());
-
-            patternEditorWindow = std::make_unique<PatternEditor::PatternEditorWindow> (
-                *this,
-                probe,
-                [safeThis] (const File& file, int repeats)
-                {
-                    if (safeThis != nullptr)
-                        safeThis->uploadFromPatternEditor (file, repeats);
-                });
+            AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Upload", "No HectoSTAR controller is connected.");
+            return;
         }
 
-        patternEditorWindow->setVisible (true);
-        patternEditorWindow->toFront (true);
-    }
+        board->setStimOutputType (0);
 
-    /*
-    if (btn == impedanceButton.get())
-    {
-        editor->measureImpedance();
-        saveImpedanceButton->setEnabled (true);
-    }
-    else if (btn == saveImpedanceButton.get())
-    {
-        FileChooser chooseOutputFile ("Please select the location to save...",
-                                      File(),
-                                      "*.xml");
+        LOGD ("Pulse Output Selected")
+        //get all text entries for waveform at stim
+        amplitude = amplitudeInput->getTextValue().toString().getIntValue();
+        period = periodInput->getTextValue().toString().getIntValue();
+        pulse_width = pulseWidthInput->getTextValue().toString().getIntValue();
+        edge_sel = edgeSelectBox->getComponentID().getIntValue();
+        pulse_count = pulseCountInput->getTextValue().toString().getIntValue();
 
-        if (chooseOutputFile.browseForFileToSave (true))
-        {
-            // Use the selected file
-            File impedenceFile = chooseOutputFile.getResult();
-            editor->saveImpedance (impedenceFile);
-        }
+        //check the enabled buttons for which LEDs to output to
+        int leds[64];
+        for (int i = 0; i < 64; ++i)
+            leds[ledMapping[i]] = toggleButtons[i]->getToggleState() ? 1 : 0;
+
+        //trig source is 0 indexed on fpga
+        board->uploadStimParameters (amplitude, period, pulse_width, edge_sel, pulse_count, (trig_source - 1), leds);
     }
-    */
-    
 }
 
-int ChannelList::getRequiredWidth() const
+String ChannelList::patternKey() const
 {
-    int right = 0;
-    for (auto* child : getChildren())
-        if (child->isVisible())
-            right = jmax (right, child->getRight());
-    return right + 20;
+    // what goes into flash: everything but the repeat count
+    PatternGen::Pattern p = patternDoc->pattern();
+    p.repeatCount = 1;
+    return String::fromUTF8 (PatternGen::toJson (p).c_str());
+}
+
+void ChannelList::changeListenerCallback (ChangeBroadcaster*)
+{
+    updateBoardStatus();
+}
+
+void ChannelList::updateBoardStatus()
+{
+    if (patternPanel == nullptr)
+        return;
+
+    const int repeats = patternDoc->pattern().repeatCount;
+
+    if (! board->foundInputSource())
+        patternPanel->setBoardStatus ("No board connected", false);
+    else if (flashFileName.isNotEmpty())
+        patternPanel->setBoardStatus ("On the board: " + flashFileName, false);
+    else if (flashKey.isEmpty())
+        patternPanel->setBoardStatus ("Not uploaded yet", false);
+    else if (flashKey != patternKey())
+        patternPanel->setBoardStatus ("Changed since the last upload", false);
+    else if (flashRepeats != repeats)
+        patternPanel->setBoardStatus ("Upload to apply the new repeat count", false);
+    else
+        patternPanel->setBoardStatus ("On the board: this pattern", true);
+}
+
+void ChannelList::uploadPattern()
+{
+    if (! board->foundInputSource())
+    {
+        AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Upload pattern", "No HectoSTAR controller is connected.");
+        return;
+    }
+
+    const String key = patternKey();
+    const int repeats = patternDoc->pattern().repeatCount;
+
+    Component::SafePointer<ChannelList> safeThis (this);
+    auto ready = [safeThis, key, repeats]
+    {
+        if (safeThis == nullptr)
+            return;
+        safeThis->board->setStimOutputType (1);
+        safeThis->board->setPatternStimRepeatCount (repeats - 1);
+        safeThis->flashKey = key;
+        safeThis->flashFileName.clear();
+        safeThis->flashRepeats = repeats;
+        safeThis->updateBoardStatus();
+    };
+
+    // flash already holds this pattern: only the repeat count changes
+    if (key == flashKey && flashFileName.isEmpty())
+    {
+        ready();
+        return;
+    }
+
+    patternPanel->prepareOutput ("Upload pattern", [safeThis, ready] (std::vector<std::uint8_t> bytes)
+                                 {
+                                     if (safeThis == nullptr)
+                                         return;
+                                     const File f = File::getSpecialLocation (File::tempDirectory).getChildFile ("HectoSTAR_pattern.bin");
+                                     f.deleteFile();
+                                     if (! f.appendData (bytes.data(), bytes.size()))
+                                     {
+                                         AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Upload pattern", "Couldn't write " + f.getFullPathName());
+                                         return;
+                                     }
+                                     safeThis->beginPatternUpload (f, [ready] (bool ok)
+                                                                   {
+                                                                       if (ok)
+                                                                           ready();
+                                                                   });
+                                 });
+}
+
+void ChannelList::uploadPatternFile (const File& file)
+{
+    const int repeats = patternDoc->pattern().repeatCount;
+    Component::SafePointer<ChannelList> safeThis (this);
+
+    beginPatternUpload (file, [safeThis, repeats, name = file.getFileName()] (bool ok)
+                        {
+                            if (! ok || safeThis == nullptr)
+                                return;
+                            safeThis->board->setStimOutputType (1);
+                            safeThis->board->setPatternStimRepeatCount (repeats - 1);
+                            safeThis->flashKey.clear();
+                            safeThis->flashFileName = name;
+                            safeThis->flashRepeats = repeats;
+                            safeThis->updateBoardStatus();
+                        });
 }
 
 void ChannelList::beginPatternUpload (const File& file, std::function<void (bool)> afterUpload)
@@ -421,19 +664,13 @@ void ChannelList::beginPatternUpload (const File& file, std::function<void (bool
     // Upload in the background (owned by the DeviceThread); the GUI stays usable.
     const bool started = board->startPatternUpload (file, [safeThis, fileName, fileSize, afterUpload] (bool ok)
                                                     {
-                                                        String message = (ok ? "File upload completed!\nFile Name: " : "File upload FAILED!\nFile Name: ") + fileName;
-
-                                                        if (ok)
-                                                            message += "\nFile Length: " + String (fileSize) + " bytes";
-
-                                                        AlertWindow::showMessageBoxAsync (ok ? AlertWindow::InfoIcon : AlertWindow::WarningIcon,
-                                                                                          ok ? "Upload Successful" : "Upload Failed",
-                                                                                          message);
+                                                        if (! ok)
+                                                            AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Upload failed",
+                                                                                              "The pattern could not be written to the board (" + fileName + ").");
 
                                                         if (safeThis != nullptr)
                                                         {
                                                             safeThis->uploadWindow.reset();
-                                                            safeThis->selectPatternFileButton->setEnabled (true);
                                                             safeThis->uploadStimParamButton->setEnabled (true);
                                                         }
 
@@ -444,7 +681,6 @@ void ChannelList::beginPatternUpload (const File& file, std::function<void (bool
     if (started)
     {
         // block re-entry until it finishes
-        selectPatternFileButton->setEnabled (false);
         uploadStimParamButton->setEnabled (false);
         uploadWindow = std::make_unique<PatternUploadWindow> (board, file, this);
     }
@@ -454,133 +690,56 @@ void ChannelList::beginPatternUpload (const File& file, std::function<void (bool
     }
 }
 
-void ChannelList::uploadFromPatternEditor (const File& file, int repeats)
-{
-    if (! board->foundInputSource())
-    {
-        AlertWindow::showMessageBoxAsync (AlertWindow::WarningIcon, "Upload pattern", "No HectoSTAR controller is connected.");
-        return;
-    }
-
-    Component::SafePointer<ChannelList> safeThis (this);
-
-    beginPatternUpload (file, [safeThis, repeats] (bool ok)
-                        {
-                            if (! ok || safeThis == nullptr)
-                                return;
-
-                            // ready to play: pattern output with the editor's repeat count
-                            safeThis->patternRepeatCount->setText (String (repeats));
-                            safeThis->outputTypeSelect->setSelectedId (2, sendNotificationSync);
-                            safeThis->board->setPatternStimRepeatCount (repeats - 1);
-                        });
-}
-
 void ChannelList::disableAll()
 {
-
     uploadStimParamButton->setEnabled (false);
 
-    //Initialize the led toggle buttons
     for (int i = 0; i < 64; ++i)
-    {
         toggleButtons[i]->setEnabled (false);
-    }
 }
 
 void ChannelList::enableAll()
 {
-    const bool uploading = board->isPatternUploadRunning();
-    uploadStimParamButton->setEnabled (! uploading);
-    selectPatternFileButton->setEnabled (! uploading);
+    uploadStimParamButton->setEnabled (! board->isPatternUploadRunning());
 
-    //Initialize the led toggle buttons
     for (int i = 0; i < 64; ++i)
-    {
         toggleButtons[i]->setEnabled (true);
-    }
 }
-
 
 void ChannelList::comboBoxChanged (ComboBox* b)
 {
-
     //pulse waveform trigger selection.
     if (b == triggerSelectBox.get())
     {
         trig_source = b->getSelectedId();
     }
-
-    //pulse or pattern stim.
-    else if (b == outputTypeSelect.get())
-    {
-        selectedStimOutputType = (b->getSelectedId() == 2); //pulse out is 1, pattern out is 2
-        board->setStimOutputType(selectedStimOutputType);
-
-        //pulse stim
-        if (!selectedStimOutputType)
-        {
-            patternOutputLabel->setVisible(false);
-            //Initialize the led toggle buttons
-            for (int i = 0; i < 64; ++i)
-            {
-                toggleButtons[i]->setEnabled(true);
-            }
-        }
-        //pattern stim
-        else
-        {
-            patternOutputLabel->setVisible (true);
-            for (int i = 0; i < 64; ++i)
-            {
-                toggleButtons[i]->setEnabled (false);
-                patternOutputLabel->setVisible (true);
-            }
-        }
-
-    }
     else if (b == probeTypeSelect.get())
     {
         const int probeGeometry = b->getSelectedId();
 
-        if (probeGeometry == 1) // 4-Shank Chronic
-        {
-            shankCount = 4;
-            buttonCountPerShank = 16; 
-            for (int i = 0; i < 64; i++)
-            {
-                ledMapping[i] = four_Shank_Chronic_mapping[i];
-            }
+        const int* mapping = four_Shank_Chronic_mapping;
+        shankCount = 4;
+        buttonCountPerShank = 16;
 
-        }
-        else if (probeGeometry == 2) // 2-Shank Chronic
+        if (probeGeometry == 2) // 2-Shank Chronic
         {
             shankCount = 2;
             buttonCountPerShank = 32;
-            for (int i = 0; i < 64; i++)
-            {
-                ledMapping[i] = two_Shank_Chronic_mapping[i];
-            }
+            mapping = two_Shank_Chronic_mapping;
         }
         else if (probeGeometry == 3) // 4 Shank Acute
-        {
-            shankCount = 4;
-            buttonCountPerShank = 16; 
-            for (int i = 0; i < 64; i++)
-            {
-                ledMapping[i] = four_Shank_Acute_mapping[i];
-            }
-        }
-        else if (probeGeometry == 4) // Demo Board (choose behavior)
-        {
-            shankCount = 4;
-            buttonCountPerShank = 16;
-            for (int i = 0; i < 64; i++)
-            {
-                ledMapping[i] = demo_Board_mapping[i];
-            }
-        }
-         // Update LED layout/visibility
+            mapping = four_Shank_Acute_mapping;
+        else if (probeGeometry == 4) // Demo Board
+            mapping = demo_Board_mapping;
+
+        for (int i = 0; i < 64; i++)
+            ledMapping[i] = mapping[i];
+
+        patternDoc->setProbe ((PatternGen::ProbeMapping) jlimit (1, 4, probeGeometry));
+
+        for (int i = 0; i < 64; ++i)
+            toggleButtons[i]->setVisible (selectedStimOutputType == 0 && i < visibleLeds());
+
         update();
     }
 }
@@ -590,6 +749,8 @@ void ChannelList::update()
     if (! board->foundInputSource())
     {
         disableAll();
+        updateBoardStatus();
+        repaint();
         return;
     }
 
@@ -597,64 +758,10 @@ void ChannelList::update()
     channelComponents.clear();
     uploadStimParamButton->setEnabled (! board->isPatternUploadRunning());
 
-    // ---- FIXED LED GEOMETRY: always use 4-lane spacing ----
-    const int ledsPerLane = 16; // fixed for 4-shank spacing
-    const int lanesVisible = (shankCount == 1 ? 2 : 4);
-    const int totalUsed = juce::jmin (64, lanesVisible * ledsPerLane);
-
     for (int i = 0; i < 64; ++i)
-    {
-        const bool used = (i < totalUsed);
-        toggleButtons[i]->setVisible (used);
-        toggleButtons[i]->setEnabled (used && ! selectedStimOutputType);
-    }
+        toggleButtons[i]->setEnabled (i < visibleLeds());
 
-    const float strokeW = 2.0f;
-    const float gap = strokeW * 8.0f;
-
-    const float startX = 50.0f;
-    const float startY = 110.0f;
-
-    const float shankW = 90.0f;
-    const float shankH = 500.0f;
-
-    const int ledSize = 20;
-
-    const float topMargin = 25.0f;
-    const float bottomMargin = 10.0f;
-
-    const float yTop = startY + topMargin;
-    const float yBottom = startY + shankH - bottomMargin;
-
-    const float usable = juce::jmax (1.0f, yBottom - yTop);
-    const float step = usable / (float) ledsPerLane;
-
-    for (int lane = 0; lane < lanesVisible; ++lane)
-    {
-        const float x = startX + lane * (shankW + gap);
-        const float cx = x + shankW * 0.5f;
-
-        for (int j = 0; j < ledsPerLane; ++j)
-        {
-            const int index = lane * ledsPerLane + j;
-            if (index >= 64)
-                continue;
-
-            // LED0 at tip/bottom for each lane
-            const float cy = yBottom - (j + 0.5f) * step;
-
-            toggleButtons[index]->setBounds ((int) std::round (cx - ledSize * 0.5f),
-                                             (int) std::round (cy - ledSize * 0.5f),
-                                             ledSize,
-                                             ledSize);
-        }
-    }
-
-    // keep LEDs clickable if anything overlaps
-    for (int i = 0; i < 64; ++i)
-        if (toggleButtons[i] && toggleButtons[i]->isVisible())
-            toggleButtons[i]->toFront (false);
-
+    updateBoardStatus();
     repaint();
 }
 
@@ -666,12 +773,12 @@ void ChannelList::paint (juce::Graphics& g)
     const float strokeW = 2.0f;
     const float gap = strokeW * 8.0f;
 
-    // Fixed geometry
-    const float startX = 55.0f;
-    const float startY = 130.0f;
+    // Fixed geometry (shared with ledCentre)
+    const float startX = kProbeX;
+    const float startY = kProbeY;
 
-    const float shankW = 90.0f;
-    const float shankH = 500.0f;
+    const float shankW = kShankW;
+    const float shankH = kShankH;
 
     const int lanesVisible = (shankCount == 1 ? 2 : 4);
 

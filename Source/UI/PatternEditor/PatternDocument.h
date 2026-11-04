@@ -49,6 +49,9 @@ public:
     bool canUndo() const { return ! undoStack.empty(); }
     bool canRedo() const { return ! redoStack.empty(); }
 
+    /** Sets the probe (follows the probe chosen in the stim panel; not an undo step). */
+    void setProbe (ProbeMapping probe);
+
     /** Replaces the whole pattern (new / open); clears undo and selection. */
     void reset (const Pattern& p, const File& file);
 

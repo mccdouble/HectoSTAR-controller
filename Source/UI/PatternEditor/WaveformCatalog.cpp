@@ -8,6 +8,7 @@
 
 #include "WaveformCatalog.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace PatternEditor
@@ -317,13 +318,190 @@ void chooseSamplesFile (std::unique_ptr<FileChooser>& holder, std::function<void
 
 void addTimingChoices (ComboBox& box)
 {
-    box.addItem ("All at once", 1);
-    box.addSectionHeading ("Staggered");
-    box.addItem ("Bottom to top (by row)", 2);
-    box.addItem ("Top to bottom (by row)", 3);
-    box.addItem ("Channel order", 4);
-    box.addItem ("Shank by shank", 5);
+    box.addItem ("All LEDs at the same time", 1);
+    box.addSectionHeading ("One LED after another");
+    box.addItem ("Tip to base (row by row)", 2);
+    box.addItem ("Base to tip (row by row)", 3);
+    box.addItem ("By LED number", 4);
+    box.addItem ("One shank after another", 5);
 }
+
+SequenceOrder orderForTiming (int timingId)
+{
+    switch (timingId)
+    {
+        case 2: return SequenceOrder::BottomToTop;
+        case 3: return SequenceOrder::TopToBottom;
+        case 4: return SequenceOrder::ChannelOrder;
+        case 5: return SequenceOrder::ShankByShank;
+        default: return SequenceOrder::Together;
+    }
+}
+
+std::vector<int> sequenceRanks (const std::vector<int>& leds, SequenceOrder order)
+{
+    // key per LED; equal keys share a rank, ranks are dense in key order
+    std::vector<int> keys;
+    for (const int led : leds)
+    {
+        switch (order)
+        {
+            case SequenceOrder::Together: keys.push_back (0); break;
+            case SequenceOrder::ChannelOrder: keys.push_back (led); break;
+            case SequenceOrder::BottomToTop: keys.push_back (rowFromBottom (led)); break;
+            case SequenceOrder::TopToBottom: keys.push_back (15 - rowFromBottom (led)); break;
+            case SequenceOrder::ShankByShank: keys.push_back (shankOf (led)); break;
+        }
+    }
+
+    std::vector<int> sorted (keys);
+    std::sort (sorted.begin(), sorted.end());
+    sorted.erase (std::unique (sorted.begin(), sorted.end()), sorted.end());
+
+    std::vector<int> ranks;
+    for (int k : keys)
+        ranks.push_back ((int) (std::lower_bound (sorted.begin(), sorted.end(), k) - sorted.begin()));
+    return ranks;
+}
+
+namespace
+{
+
+String num (double v, int decimals = 3)
+{
+    String s (v, decimals);
+    if (s.containsChar ('.'))
+        s = s.trimCharactersAtEnd ("0").trimCharactersAtEnd (".");
+    return s;
+}
+
+String msText (double s)
+{
+    return num (s * 1000.0) + " ms";
+}
+
+} // namespace
+
+String describeWave (const Block& b)
+{
+    const String uA = " " + kMicroAmps;
+
+    switch (b.wave.kind)
+    {
+        case WaveKind::Shaped:
+        {
+            const auto& t = b.wave.shaped;
+            const int n = shapedCount (t);
+            String s = shapeName (t.shape) + ", " + num (t.amp) + uA + (t.equalCharge ? " equiv." : "") + ", " + msText (t.width);
+            if (n > 1)
+                s << " x " << n << " at " << num (t.rate) << " Hz";
+            if (t.step != 0)
+                s << ", " << (t.step > 0 ? "+" : "") << num (t.step) << uA << "/pulse";
+            return s;
+        }
+        case WaveKind::Builtin:
+        {
+            const auto& w = b.wave.builtin;
+            String s = waveDisplayName (b.wave);
+            switch (w.type)
+            {
+                case WaveType::FixedPulse:
+                case WaveType::PulseStaircase:
+                case WaveType::FixedSawtooth:
+                case WaveType::FixedSine:
+                    s << ", " << num (w.amp) << uA << ", " << (int) std::round (w.freq) << " x " << msText (w.offset);
+                    break;
+                case WaveType::Wavelet:
+                    s << ", " << num (w.amp) << uA << ", " << msText (w.offset);
+                    break;
+                case WaveType::None:
+                    break;
+                default:
+                    s << ", " << num (w.freq) << " Hz, " << num (w.amp) << uA;
+                    break;
+            }
+            return s;
+        }
+        case WaveKind::Breakpoints:
+            return "Points (" + String ((int) b.wave.points.size()) + ")" + (b.wave.repeat ? ", repeating" : "");
+        case WaveKind::Samples:
+            return "Samples (" + String ((int) b.wave.samples.size()) + ")" + (b.wave.repeat ? ", repeating" : "");
+        case WaveKind::Formula:
+            return "Formula: " + String::fromUTF8 (b.wave.formula.c_str());
+    }
+    return {};
+}
+
+double cycleLength (const Block& b)
+{
+    const double minLen = 4.0 / kSampleRateHz;
+    auto clampLen = [minLen] (double v) { return std::isfinite (v) && v > minLen ? std::min (v, 13.0) : 0.1; };
+
+    switch (b.wave.kind)
+    {
+        case WaveKind::Shaped:
+        {
+            const auto& t = b.wave.shaped;
+            if (shapedCount (t) > 1)
+                return clampLen ((double) shapedPeriodSamples (t) / kSampleRateHz);
+            return clampLen (1.25 * shapedPulseSamples (t) / kSampleRateHz);
+        }
+        case WaveKind::Builtin:
+        {
+            const auto& w = b.wave.builtin;
+            switch (w.type)
+            {
+                case WaveType::FixedPulse:
+                case WaveType::PulseStaircase:
+                case WaveType::FixedSawtooth:
+                case WaveType::FixedSine:
+                case WaveType::Wavelet:
+                    return clampLen (w.offset);
+                case WaveType::DoubleSine:
+                    return clampLen (1.0 / std::max (1.0e-3, std::min (std::fabs (w.freq), std::fabs (w.offset))));
+                case WaveType::None:
+                    return 0.1;
+                default:
+                    return clampLen (1.0 / std::max (1.0e-3, std::fabs (w.freq)));
+            }
+        }
+        case WaveKind::Breakpoints:
+            return clampLen (b.wave.points.empty() ? 0.0 : b.wave.points.back().time);
+        case WaveKind::Samples:
+            return clampLen ((double) b.wave.samples.size() / kSampleRateHz);
+        case WaveKind::Formula:
+            return clampLen (std::min (b.length > 0 ? b.length : 1.0, 1.0));
+    }
+    return 0.1;
+}
+
+std::vector<double> renderAlone (const Block& b, double length)
+{
+    length = std::max (1.0 / kSampleRateHz, std::min (length, 13.0));
+
+    Pattern p;
+    p.duration = length;
+    Block x = b;
+    x.id = 1;
+    x.led = 1;
+    x.start = 0;
+    x.link = 0;
+    if (x.length <= 0)
+        x.length = length;
+    p.blocks.push_back (x);
+
+    PatternData d;
+    std::string error;
+    if (! renderPattern (p, d, error))
+        return {};
+
+    std::vector<double> out ((std::size_t) d.numSamples);
+    const std::uint8_t* lane = d.led (0);
+    for (int i = 0; i < d.numSamples; ++i)
+        out[(std::size_t) i] = lane[i];
+    return out;
+}
+
 
 bool timingIsStaggered (int id)
 {

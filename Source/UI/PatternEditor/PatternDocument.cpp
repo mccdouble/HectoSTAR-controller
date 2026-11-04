@@ -84,6 +84,18 @@ void PatternDocument::reset (const Pattern& p, const File& f)
     sendChangeMessage();
 }
 
+void PatternDocument::setProbe (ProbeMapping probe)
+{
+    if (current.probe == probe)
+        return;
+    current.probe = probe;
+    for (auto& p : undoStack)
+        p.probe = probe;
+    for (auto& p : redoStack)
+        p.probe = probe;
+    sendChangeMessage();
+}
+
 void PatternDocument::changed()
 {
     dirty = true;

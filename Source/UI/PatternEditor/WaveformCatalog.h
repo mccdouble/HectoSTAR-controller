@@ -66,10 +66,36 @@ String waveDisplayName (const WaveSpec& wave);
     holder keeps the chooser alive; done gets the values and file name. */
 void chooseSamplesFile (std::unique_ptr<FileChooser>& holder, std::function<void (std::vector<double>, std::string)> done);
 
-/** Timing choices for placing blocks on several LEDs (ids 1..5). */
+/** Timing choices for placing one waveform on several LEDs (ids 1..5):
+    all at the same time, or one after another in an order. */
 void addTimingChoices (ComboBox& box);
 
-/** Order for a timing choice id; false for "All at once". */
+/** True for the "one after another" choices. */
 bool timingIsStaggered (int id);
+
+enum class SequenceOrder
+{
+    Together,     // all start at once
+    ChannelOrder, // LED 1, 2, ...
+    BottomToTop,  // row by row up the shanks; same row starts together
+    TopToBottom,
+    ShankByShank  // shank 1, then 2, ...; a whole shank starts together
+};
+
+SequenceOrder orderForTiming (int timingId);
+
+/** Rank (0, 1, 2, ...) of each LED in the order; equal ranks start together. */
+std::vector<int> sequenceRanks (const std::vector<int>& leds, SequenceOrder order);
+
+/** One-line summary of a block, e.g. "Gaussian, 50 uA, 10 ms x 10 at 10 Hz". */
+String describeWave (const Block& b);
+
+/** Length (s) of one cycle of the waveform: one pulse period, one period of
+    a continuous wave, one repeat of a custom shape. */
+double cycleLength (const Block& b);
+
+/** Renders the block alone from t = 0 for length s; uA per 20 kHz sample, as
+    the DAC will output it. */
+std::vector<double> renderAlone (const Block& b, double length);
 
 } // namespace PatternEditor

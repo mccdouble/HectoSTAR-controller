@@ -42,6 +42,15 @@ public:
         applyColours();
     }
 
+    /** Changes the colour style (used for tab-like buttons). */
+    void setStyle (Style s)
+    {
+        if (style == s)
+            return;
+        style = s;
+        applyColours();
+    }
+
     void lookAndFeelChanged() override { applyColours(); }
 
 private:

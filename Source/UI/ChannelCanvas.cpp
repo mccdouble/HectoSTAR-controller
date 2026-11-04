@@ -103,36 +103,11 @@ void ChannelCanvas::resized()
     const int scrollBarThickness = channelViewport->getScrollBarThickness();
     channelViewport->setBounds (0, 0, getWidth(), getHeight());
 
-    // --- MUST match your layout constants used in ChannelList::update() and ChannelCanvas::paint() ---
-    const float startX = 30.0f;
-    const float startY = 170.0f;
-
-    float shankLength = 500.0f;
-    const float shankH = 80.0f;
-
-    const float shankThickness = 2.0f;
-    const float gap = shankThickness * 8.0f;
-
-    const int shanks = getShankCount();
-
-    // your rule: 1- and 2-shank are longer
-    if (shanks == 1 || shanks == 2)
-        shankLength *= 2.0f;
-
-    // Content size big enough to include:
-    // - left labels margin
-    // - full shank length to the right
-    // - some extra margin
-    // ...and never narrower than the controls along the top
-    const int contentW = jmax ((int) std::ceil (startX + shankLength + 250.0f), channelList->getRequiredWidth());
-
-    // Height big enough for stacked shanks + some UI above + disclaimer below
-    const float probeBottom = startY + (shanks - 1) * (shankH + gap) + shankH;
-    const int contentH = (int) std::ceil (probeBottom + 120.0f);
-
+    // fill the visible area, scrolling only when it is smaller than the stim panel needs
+    const int contentW = jmax (ChannelList::kMinWidth, getWidth() - scrollBarThickness);
+    const int contentH = jmax (ChannelList::kMinHeight, getHeight() - scrollBarThickness);
     channelList->setBounds (0, 0, contentW, contentH);
 
-    // Optional: keep scrollbars visible
     channelViewport->setScrollBarsShown (true, true);
     channelViewport->setScrollBarThickness (scrollBarThickness);
 }
