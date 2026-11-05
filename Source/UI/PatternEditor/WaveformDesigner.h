@@ -73,6 +73,8 @@ private:
     // pulse shapes: the maths behind the train, and a way to adapt it
     Label maths;
     EditorButton asFormulaButton { "Edit as formula" };
+    HyperlinkButton paperLink { "Source: Bansal, Pyari & Roy 2023, Photonics 10(5):571",
+                                URL ("https://doi.org/10.3390/photonics10050571") };
     void updateMaths();
     void convertToFormula();
 

@@ -260,6 +260,9 @@ WaveformDesigner::WaveformDesigner (PatternDocument& d) : doc (d)
     asFormulaButton.setTooltip ("Turn this pulse train into a Custom formula that plays exactly the same samples, so it can be adapted");
     asFormulaButton.onClick = [this] { convertToFormula(); };
     addAndMakeVisible (asFormulaButton);
+    paperLink.setTooltip ("Opens the paper this pulse shape is taken from (Table 6): doi.org/10.3390/photonics10050571");
+    paperLink.setFont (FontOptions (12.0f), false, Justification::centredLeft);
+    addChildComponent (paperLink);
 
     addAndMakeVisible (preview);
     cycleButton.onClick = [this]
@@ -482,6 +485,7 @@ void WaveformDesigner::updateVisibility()
     chargeToggle.setVisible (k == WaveKind::Shaped && working.wave.shaped.shape != PulseShape::Square);
     maths.setVisible (k == WaveKind::Shaped);
     asFormulaButton.setVisible (k == WaveKind::Shaped);
+    paperLink.setVisible (k == WaveKind::Shaped && ! pulseShapePaperName (working.wave.shaped.shape).empty());
 
     pointsLabel.setVisible (k == WaveKind::Breakpoints);
     pointsEditor.setVisible (k == WaveKind::Breakpoints);
@@ -839,6 +843,7 @@ void WaveformDesigner::resized()
         maths.setBounds (0, y, x1, h);
         y += h + 4;
         asFormulaButton.setBounds (0, y, 130, 24);
+        paperLink.setBounds (140, y, jmax (0, x1 - 140), 24);
         y += 30;
     }
 
